@@ -1,0 +1,23 @@
+# NOTICE
+
+本文件记录 OMZ（Oh My ZCode）的第三方来源与归属声明。`LICENSE` 只含本项目自身的 MIT 全文，
+以便 GitHub 的许可证识别正确判定为 MIT；来源说明集中在此。
+
+## 上游来源：oh-my-openagent（OmO）
+
+OMZ 的编排协议——ultrawork 生命周期，以及 `ulw-plan` / `ulw-execute` / `ulw-research` /
+`review-work` 四个 skill 的协议文本——**选择性移植**自 oh-my-openagent（OmO），
+仓库 <https://github.com/code-yeongyu/oh-my-openagent>。移植是能力对标与重写，不是整仓 fork，
+也不是代码搬运；同步纪律见 `DESIGN.md` §16。
+
+- 逐路径的来源锁定（`source` / `ported_paths` / `omz_target` / `port_status`）见
+  `upstream/omo-sources.lock.json`。
+- 上游许可证信息、同步流程与不适用路径见 `upstream/omo-sources.lock.json` 的 `license` 段与
+  `upstream/README.md`。以那两处为准，本文件不复述许可证结论。
+- 取证状态可用 `node tools/doctor.mjs --supply-chain` 现场查看（`supply:lock` 与
+  `supply:upstream-license` 两项）。
+
+## 可选外部依赖
+
+`graph` profile 需用户自行安装 `@colbymchenry/codegraph`，本仓库不包含其代码或索引，
+也不对其许可证作声明。安装与版本取证同样见 `node tools/doctor.mjs --supply-chain`。

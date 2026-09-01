@@ -1,0 +1,32 @@
+{
+  "name": "omz",
+  "version": "1.5.0",
+  "description": "Oh My ZCode — OmO (oh-my-openagent) orchestration capabilities ported to ZCode",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test tests/",
+    "test:path": "node --test tests/path.test.mjs",
+    "test:fallback": "node --test tests/fallback.test.mjs",
+    "test:transport": "node --test tests/transport.test.mjs",
+    "test:coordinator": "node --test tests/coordinator.test.mjs",
+    "test:mcp": "node --test tests/server-mcp.test.mjs",
+    "test:dashboard": "node --test tests/dashboard.test.mjs",
+    "test:hooks": "node --test tests/hooks.test.mjs",
+    "test:protocol": "node --test tests/protocol.test.mjs",
+    "test:integration": "node --test tests/integration.test.mjs",
+    "validate": "node tools/validate-frontmatter.mjs .",
+    "doctor": "node tools/doctor.mjs",
+    "doctor:supply-chain": "node tools/doctor.mjs --supply-chain",
+    "status": "node tools/render-status.mjs",
+    "sync:check": "node tools/sync-omo-skills.mjs --check",
+    "coordinator": "node mcp/coordinator/server.mjs",
+    "dashboard": "node dashboard/server.mjs",
+    "dashboard:electron": "node dashboard/main.mjs",
+    "hook:self-test": "node hooks/keyword-detect.mjs --self-test"
+  },
+  "private": true
+}

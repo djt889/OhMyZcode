@@ -1,0 +1,105 @@
+{
+  "$schema_note": "OMZ 上游来源锁定文件；结构见 DESIGN.md §16.4。禁止手写假 SHA——未 pin 一律 null。",
+  "source": "code-yeongyu/oh-my-openagent",
+  "url": "https://github.com/code-yeongyu/oh-my-openagent.git",
+  "branch": "dev",
+  "commit": null,
+  "commit_status": "unpinned — 首次 sync 时由 tools/sync-omo-skills.mjs 写入实际 SHA",
+  "synced_at": null,
+  "synced_at_status": "never — 尚未执行过 git fetch upstream；首次同步后由 tools/sync-omo-skills.mjs --pin 回写 ISO-8601",
+  "ported_paths": [
+    {
+      "path": "packages/shared-skills/skills/ulw-plan/SKILL.md",
+      "omz_target": "skills/ulw-plan/SKILL.md",
+      "port_status": "adapted",
+      "port_note": "协议按 DESIGN §7.5.1 移植；ZCode 无 task(category=) 宿主 API，category 降级为计划文本注解。上游原文未逐字比对（未 clone）。"
+    },
+    {
+      "path": "packages/shared-skills/skills/ulw-execute/SKILL.md",
+      "omz_target": "skills/ulw-execute/SKILL.md",
+      "port_status": "adapted",
+      "port_note": "按 DESIGN §7.5.2 移植；波次并行改为 ZCode 短命 Agent 后台 spawn，results 文件为唯一事实源。"
+    },
+    {
+      "path": "packages/shared-skills/skills/ulw-research/SKILL.md",
+      "omz_target": "skills/ulw-research/SKILL.md",
+      "port_status": "adapted",
+      "port_note": "按 DESIGN §7.5.3 移植；5 个认识论文档模板落在 skills/ulw-research/references/。teammode 调度语义本土补齐。"
+    },
+    {
+      "path": "packages/shared-skills/skills/review-work/SKILL.md",
+      "omz_target": "skills/review-work/SKILL.md",
+      "port_status": "adapted",
+      "port_note": "按 DESIGN §7.5.4 移植；lane prompt 与裁决契约落在 skills/review-work/references/。omz-oracle 有 Read/Bash（与上游 oracle 不可读文件的假设不同）。"
+    },
+    {
+      "path": "packages/prompts-core/prompts/ultrawork/glm.md",
+      "omz_target": "commands/ulw.md",
+      "port_status": "adapted",
+      "port_note": "ultrawork 提示词（/ulw 的来源）；ZCode slash command 单文件形态，goal/boulder 状态落 .omz/。上游原文未逐字比对（未 clone）。",
+      "note": "此前该项 pin 到目录 packages/prompts-core/prompts/ultrawork/，无法判断移植的是哪个宿主变体——来源锁定精度不足。已 pin 到 glm.md（最贴合 ZCode 宿主）。同目录另有 5 个宿主变体未移植：codex.md、default.md、gemini.md、gpt.md、planner.md（2026-09-01 经 GitHub Contents API 核实为 6 个文件）。"
+    }
+  ],
+  "ignored_paths": [
+    "packages/omo-opencode",
+    "packages/omo-codex",
+    "packages/team-core",
+    "packages/tmux-core",
+    "packages/model-core"
+  ],
+  "ignored_reason": "宿主运行时/宿主 API 绑定（OpenCode/Codex/tmux/model routing），不适用于 ZCode；等价语义由 OMZ 自有 coordinator MCP 与 adapters/zcode/ 实现。",
+  "license": {
+    "omo": {
+      "spdx": "LicenseRef-SUL-1.0",
+      "name": "Sustainable Use License 1.0",
+      "status": "verified",
+      "verified_at": "2026-09-01",
+      "verified_via": "GitHub License API + LICENSE.md",
+      "url": "https://github.com/code-yeongyu/oh-my-openagent/blob/dev/LICENSE.md",
+      "github_metadata": {
+        "license_name": "Other",
+        "spdx_id": "NOASSERTION",
+        "note": "GitHub 无法映射到 OSI/SPDX 标准协议，故标为 Other/NOASSERTION；SUL 无官方 SPDX id，本文件按惯例用 LicenseRef- 前缀。不是 MIT，也不是 GPL 类。"
+      },
+      "key_terms": [
+        "You may use or modify the software only for your own internal business purposes or for non-commercial or personal use.",
+        "You may distribute the software or provide it to others only if you do so free of charge for non-commercial purposes.",
+        "You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms. If you modify the software, you must include in any modified copies of the software a prominent notice stating that you have modified the software."
+      ],
+      "key_terms_note": "以上为 LICENSE.md 的英文原文片段（Limitations 与 Notices 两节），照抄未改写。",
+      "overlap_analysis": {
+        "method": "8-gram verbatim overlap",
+        "upstream_sample": "4 SKILL.md, 116784 bytes, 15824 8-grams",
+        "omz_sample": "skills/ + commands/ + agents/ 下全部 md",
+        "shared_8grams": 9,
+        "shared_source": "single JSON enum line: verdict: confirmed | false-positive | needs-fix | needs-human-review",
+        "size_contrast": [
+          "skills/review-work/SKILL.md 3870 bytes vs 上游 29316 bytes",
+          "skills/ulw-research/SKILL.md 9125 bytes vs 上游 49319 bytes"
+        ],
+        "absent_upstream_structures": [
+          "MANDATORY OPENING ANNOUNCEMENT",
+          "decision-complete",
+          "## Todos",
+          "## Final verification wave"
+        ],
+        "analyzed_at": "2026-09-01",
+        "coverage_gap": "未比对上游 packages/prompts-core/prompts/ultrawork/ 下 6 个文件（glm.md 最相关）与 references/ 目录"
+      },
+      "status_note": "本项目对上游做的是能力对标与协议语义重实现，不是文本复制（见 overlap_analysis）。上游许可证与本仓库 MIT 声明之间的边界属法律判断，超出本文件的取证范围——发布前需项目所有者确认。本文件只记录已核实的事实。"
+    },
+    "codegraph": {
+      "source": "colbymchenry/codegraph",
+      "spdx": "MIT",
+      "status": "verified — 上游 README 声明 MIT（DESIGN §16.4 结论表）",
+      "note": "作为独立 MCP 依赖接入，不 fork；M1-G 锁版本时同步记录 NOTICE。"
+    },
+    "notice_requirement": "每次 sync 必须在本文件登记上游许可证与 NOTICE；许可证状态为 unverified 时禁止合并进 main。"
+  },
+  "notes": [
+    "本文件只记录来源与移植状态，不存放上游代码（DESIGN §16.2）。",
+    "禁止 git merge upstream/dev；同步必须走 §16.3 的 5 步筛选路径（DESIGN §16.3）。",
+    "commit 为 null 是诚实的未 pin 状态：tools/sync-omo-skills.mjs --check 报 WARN（退出码 0），--plan 会把 diff 命令替换为取 SHA 的 pin 提示；缺字段或 omz_target 缺失才是 ERROR（退出码 1）。",
+    "license.omo 已核实为 SUL-1.0（2026-09-01，GitHub License API + LICENSE.md 原文）。许可证边界的最终判断归项目所有者，本文件只做取证：记录已核实的事实（协议名、关键条款原文、逐字重叠度证据与其覆盖缺口），不做法律结论。"
+  ]
+}

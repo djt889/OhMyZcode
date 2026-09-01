@@ -1,0 +1,41 @@
+# 运行时状态：/ulw 与 hook 在工作目录建 .omz/（goal/plans/evidence/boulder.json/marker/runtime）
+# 含项目绝对路径与任务内容，是运行痕迹不是源码
+.omz/
+
+# 依赖目录：本项目零第三方运行时依赖，但用户可能装 electron 或 codegraph
+node_modules/
+
+# SQLite 库与 WAL 边车文件。三条都必须写：WAL 模式下 -wal/-shm 与主库同时存在，
+# 只忽略 *.sqlite 会让 -wal 漏进仓库。库里含真实项目绝对路径、任务 title、
+# agent_ref 与 payload —— 这是信息外泄面，不只是脏文件。
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+
+# 日志
+*.log
+
+# 临时产物：adapters/zcode/path.mjs 的原子写用 <file>.tmp-<pid>-<rand> 中间文件，崩溃时会残留
+tmp-*
+tmp/
+
+# 冒烟与一次性验证产物
+.smoke-*
+
+# 覆盖率报告
+coverage/
+
+# IDE 与编辑器：含本机绝对路径、个人偏好、有时含 token
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS 元数据
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini

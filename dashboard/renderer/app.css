@@ -1,0 +1,235 @@
+/*
+ * OMZ dashboard 样式：深色终端风、等宽、紧凑表格。
+ * I5 布局防护：所有表格 table-layout: fixed + overflow-wrap: anywhere，
+ * 单个超长/无空白字符串（恶意 title、长路径、5000 字符 payload）只能在列宽内折行，
+ * 不可能撑破布局或触发横向滚动溢出。状态色一律由 [data-state] 属性驱动，renderer 不拼样式串。
+ */
+:root {
+  --bg: #0d1117;
+  --bg2: #11161d;
+  --bg3: #161b22;
+  --line: #262d36;
+  --fg: #cdd6e0;
+  --fg-dim: #7a8798;
+  --accent: #58a6ff;
+  --ready: #58a6ff;
+  --running: #d9a13a;
+  --done: #3fb950;
+  --failed: #f85149;
+  --dead: #8b1c17;
+  --blocked: #6e7681;
+  --pending: #8fa3bf;   /* 待执行（§7.3 四态之一）：灰蓝，中性但可辨识 */
+  --corrupt: #ff7b45;   /* 文件损坏：醒目橙红，绝不与 unknown 同色——它是数据损坏信号 */
+  --unknown: #a371f7;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "DejaVu Sans Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.5 var(--mono);
+}
+
+/* ---- header ---- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 700; letter-spacing: .04em; }
+.brand .ro {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--fg-dim);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stamp { color: var(--fg-dim); font-size: 11px; }
+
+.badge {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg3);
+  color: var(--fg-dim);
+}
+.badge[data-source="coordinator"] { color: var(--done); border-color: var(--done); }
+.badge[data-source="files"] { color: var(--running); border-color: var(--running); }
+.badge[data-conn="live"] { color: var(--done); border-color: var(--done); }
+.badge[data-conn="ok"] { color: var(--ready); border-color: var(--ready); }
+.badge[data-conn="retry"], .badge[data-conn="warn"] { color: var(--running); border-color: var(--running); }
+.badge[data-conn="down"] { color: var(--failed); border-color: var(--failed); }
+
+/* ---- 降级提示 ---- */
+.degrade {
+  margin: 10px 14px 0;
+  padding: 8px 12px;
+  background: #1d1608;
+  border: 1px solid var(--running);
+  border-left-width: 3px;
+  border-radius: 3px;
+}
+.degrade-title { color: var(--running); font-weight: 700; margin-bottom: 4px; }
+.degrade-list { margin: 0; padding-left: 18px; color: var(--fg); overflow-wrap: anywhere; }
+
+/* ---- panels ---- */
+main { padding: 10px 14px 20px; display: flex; flex-direction: column; gap: 14px; }
+.panel {
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.panel h2 {
+  margin: 0;
+  padding: 7px 12px;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--bg3);
+  border-bottom: 1px solid var(--line);
+}
+.count {
+  margin-left: 6px;
+  padding: 0 6px;
+  color: var(--fg-dim);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 10px;
+  text-transform: none;
+}
+
+/* ---- teams strip ---- */
+.teams-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.team-card {
+  min-width: 210px;
+  max-width: 340px;
+  padding: 7px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+.team-name { font-weight: 700; }
+.team-sub { color: var(--fg-dim); font-size: 11px; margin: 2px 0 5px; }
+.team-counts { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ---- tables：fixed 布局是 I5 的布局防护 ---- */
+.table-wrap { overflow-x: auto; }
+table.grid {
+  width: 100%;
+  min-width: 900px;
+  table-layout: fixed;      /* 内容不得决定列宽 */
+  border-collapse: collapse;
+}
+table.grid th, table.grid td {
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;  /* 无空白长串强制折行 */
+  word-break: break-word;
+  white-space: normal;
+}
+table.grid th {
+  color: var(--fg-dim);
+  font-weight: 600;
+  background: var(--bg3);
+  position: sticky;
+  top: 0;
+}
+table.grid th .hint { font-weight: 400; font-size: 10px; color: #5c6773; }
+table.grid tbody tr:nth-child(even) { background: rgba(255, 255, 255, .015); }
+table.grid tbody tr:hover { background: rgba(88, 166, 255, .06); }
+
+col.c-team { width: 11%; }
+col.c-wave { width: 5%; }
+col.c-key { width: 12%; }
+col.c-title { width: 24%; }
+col.c-state { width: 13%; }
+col.c-owner { width: 14%; }
+col.c-num { width: 7%; }
+
+.mono { font-family: var(--mono); }
+.dim { color: var(--fg-dim); }
+.num { text-align: right; }
+.wrap { overflow-wrap: anywhere; }
+
+/* ---- 状态药丸：选择器集合必须与 app.js 的 STATES 白名单一一对应 ---- */
+.pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  color: var(--unknown);
+}
+.pill[data-state="ready"] { color: var(--ready); }
+.pill[data-state="running"] { color: var(--running); }
+.pill[data-state="done"] { color: var(--done); }
+.pill[data-state="failed"] { color: var(--failed); }
+.pill[data-state="dead"] { color: var(--dead); background: rgba(139, 28, 23, .18); }
+.pill[data-state="blocked"] { color: var(--blocked); }
+/* 文件视图附加两态（见 app.js STATES 注释）：pending=待执行、corrupt=数据损坏 */
+.pill[data-state="pending"] { color: var(--pending); }
+.pill[data-state="corrupt"] { color: var(--corrupt); background: rgba(255, 123, 69, .14); font-weight: 700; }
+.pill[data-state="unknown"] { color: var(--unknown); }
+
+/* ---- events ---- */
+.events {
+  margin: 0;
+  padding: 8px 12px 10px 12px;
+  list-style: none;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.event {
+  display: block;
+  padding: 3px 0;
+  border-bottom: 1px dotted var(--line);
+  overflow-wrap: anywhere;
+}
+.event-head { color: var(--accent); margin-right: 8px; }
+.event-tail { color: var(--fg-dim); }
+
+.notes {
+  margin: 0;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-dim);
+}
+
+/* ---- footer ---- */
+.footbar {
+  padding: 8px 14px 16px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.footbar code { color: var(--fg); }

@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "JSON 不支持注释，故用本字段承载设计说明（引擎只读 hooks 字段，顶层其余键一律忽略，见 hooks/README.md）。",
+    "顶层 enabled / maxOutputBytes 已删除：引擎的 parsePluginHookEvents 只取本文件的 hooks 字段，顶层键从不读取；",
+    "合并插件 hook 时引擎强制 enabled:true，maxOutputBytes 取自用户/内部配置（缺省 32768），写在这里没有任何运行时效果，只会误导读者。",
+    "本 hook 故意不写元素级 enabled:false（元素级 enabled 才是引擎真读、真能关停的位置）——留空即让 hook 正常跑，",
+    "由 keyword-detect.mjs 内的语义闸把关：config.keyword_hook !== true 时立即返回 {}（DESIGN §15.5 的产品默认值）。",
+    "取舍：用户只改项目配置（keyword_hook: true）即可启用，不必编辑插件文件；代价是未启用时每条消息仍付约 126-132ms 的空跑成本。",
+    "若改成元素级 enabled:false，hook 根本不会启动，语义闸永不触及，两道开关退化为一道死开关，启用需改插件文件——故不采用。",
+    "timeoutMs 是元素级字段，引擎确实读取（tests/hooks.test.mjs 断言 SCAN_BUDGET_MS 相对它留一半余量），不要动。"
+  ],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "[Uu][Ll][Ww]|[Uu][Ll][Tt][Rr][Aa]|[Tt][Ee][Aa][Mm]|[Hh][Yy][Pp][Ee][Rr]",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/keyword-detect.mjs"],
+            "timeoutMs": 3000,
+            "statusMessage": "OMZ 关键词检测（M2 IntentGate）"
+          }
+        ]
+      }
+    ]
+  }
+}

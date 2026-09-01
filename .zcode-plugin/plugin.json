@@ -1,0 +1,26 @@
+{
+  "name": "omz",
+  "version": "1.5.0",
+  "description": "Oh My ZCode — OmO 编排能力的 ZCode 移植：core（agents/commands/skills）+ 可选 graph/orchestration/dashboard profile",
+  "author": {
+    "name": "OMZ"
+  },
+  "license": "MIT",
+  "agents": "agents",
+  "commands": "commands",
+  "skills": "skills",
+  "hooks": "hooks/hooks.json",
+  "mcpServers": {
+    "omz-coordinator": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${ZCODE_PLUGIN_ROOT}/mcp/coordinator/server.mjs"],
+      "cwd": "${ZCODE_PROJECT_DIR}",
+      "enabled": false,
+      "timeoutMs": 30000,
+      "env": {
+        "OMZ_COORDINATOR_DB": "${ZCODE_PROJECT_DIR}/.omz/runtime/coordinator.sqlite"
+      }
+    }
+  }
+}

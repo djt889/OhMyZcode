@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>OMZ 状态面板（只读）</title>
+<!-- 零内联脚本、零内联样式：CSP script-src 'self' / style-src 'self' 会拒绝任何 inline（I5）。 -->
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">OMZ 状态面板<span class="ro">只读</span></div>
+  <div class="meta">
+    <span class="badge" id="source-badge" data-source="unknown">数据源 —</span>
+    <span class="badge" id="conn-badge" data-conn="init">连接 —</span>
+    <span class="stamp" id="generated-at">—</span>
+  </div>
+</header>
+
+<section class="degrade" id="degrade-box" hidden>
+  <div class="degrade-title">降级提示</div>
+  <ul class="degrade-list" id="degrade-list"></ul>
+</section>
+
+<main>
+  <!-- Teams & Tasks：transport_state 与 coordinator_state 必须是两列，绝不合并（I3）。 -->
+  <section class="panel">
+    <h2>Teams &amp; Tasks <span class="count" id="tasks-count">0</span></h2>
+    <div class="teams-strip" id="teams-strip"></div>
+    <div class="table-wrap">
+      <table class="grid" id="tasks-table">
+        <colgroup>
+          <col class="c-team"><col class="c-wave"><col class="c-key"><col class="c-title">
+          <col class="c-state"><col class="c-state"><col class="c-owner"><col class="c-num">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>team</th><th>wave</th><th>key</th><th>title</th>
+            <th>transport_state<br><span class="hint">传输层（agents）</span></th>
+            <th>coordinator_state<br><span class="hint">调度层（tasks.status）</span></th>
+            <th>owner_agent</th><th>attempts</th>
+          </tr>
+        </thead>
+        <tbody id="tasks-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Agents <span class="count" id="agents-count">0</span></h2>
+    <div class="table-wrap">
+      <table class="grid" id="agents-table">
+        <colgroup>
+          <col class="c-team"><col class="c-key"><col class="c-owner">
+          <col class="c-state"><col class="c-key"><col class="c-num">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>team</th><th>agent_ref</th><th>role</th>
+            <th>transport_state</th><th>resume_ref</th><th>last_seen</th>
+          </tr>
+        </thead>
+        <tbody id="agents-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Mailbox <span class="count" id="mail-pending">0</span></h2>
+    <div class="table-wrap">
+      <table class="grid" id="mail-table">
+        <colgroup><col class="c-owner"><col class="c-num"></colgroup>
+        <thead><tr><th>to_agent</th><th>未 ack</th></tr></thead>
+        <tbody id="mail-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Events <span class="count" id="events-count">0</span></h2>
+    <ol class="events" id="events-list"></ol>
+  </section>
+
+  <section class="panel" id="notes-panel" hidden>
+    <h2>文件视图原始行</h2>
+    <pre class="notes" id="notes-box"></pre>
+  </section>
+</main>
+
+<footer class="footbar">
+  loopback-only · 随机端口 · 每次启动随机 token · 无写入端点 ·
+  数据源不可用时自动回退 <code>.omz/</code> 文件视图（另见 <code>/omz-status</code>）
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
