@@ -3,15 +3,34 @@
  * OMZ dashboard 服务端：loopback-only HTTP + SSE 只读状态面板
  * （DESIGN §1.5 本土化结论第 4 条 / §3.1 展示层 / §3.3 dashboard profile / §13.5 I5 / §15.3）。
  *
- * I5 七道防护逐条落点：
- *   1. 只绑 loopback（默认 127.0.0.1）；非 loopback 来源在看 token 之前直接 403 并 destroy socket。
- *   2. 随机端口：port=0 交由系统分配，不使用固定端口。
- *   3. 每次启动随机 token（crypto.randomBytes(24)）；比较用 timingSafeEqual（恒定时间）。
- *   4. CORS 白名单只含 http://127.0.0.1:<本服务端口> 与 http://localhost:<本服务端口>；
- *      无 Origin 头（同源 fetch/EventSource/curl）放行，其它一律 403。
- *   5. SSE 只发结构化 JSON 快照事件，不透传任何原始终端流或命令通道。
- *   6. CSP default-src 'none' + script-src 'self'，禁 inline script；HTML 转义责任在 renderer 的 textContent。
- *   7. 只读：全部端点是 GET，任何其它方法 405；没有任何写入或命令执行端点。
+ * I5 防护逐条落点（本文件按**代码结构**切分为七条，每条给出真实函数落点；与 DESIGN §13.5 I5 的
+ * 六道切分是同一组防护的不同粒度，对照见下方「与 DESIGN §13.5 I5 的切分差异」）：
+ *   1. 只绑 loopback：listen() 里 server.listen(port, host)，host 默认 127.0.0.1，绝不 0.0.0.0；
+ *      isLoopbackRequest() 在看 token 之前判来源，非 loopback 直接 403 并 destroy socket。
+ *   2. 随机端口：createServer 的 port 默认 0，由系统分配，不使用固定端口。
+ *   3. 每次启动随机 token：token 未显式给出时 crypto.randomBytes(24)（createServer 里的 authToken）；
+ *      比较走 safeEqual() 的 timingSafeEqual（恒定时间；长度不等先判 false）。
+ *   4. CORS 白名单只含 http://127.0.0.1:<本服务端口> 与 http://localhost:<本服务端口>（checkOrigin()
+ *      + originsFor()）；无 Origin 头（同源 fetch/EventSource/curl）放行，其它一律 403。请求行目标
+ *      另经 checkRequestTarget() 收紧：absolute-form 必须命中同一白名单，否则 400。
+ *   5. SSE 只发结构化 JSON 快照事件：handleSse() 只 send 'snapshot'/'heartbeat'，sseEncode() 只编码
+ *      JSON；不透传任何原始终端流或命令通道。
+ *   6. CSP default-src 'none' + script-src 'self'（SECURITY_HEADERS，经 writeHead() 挂在每个响应上，
+ *      含 404/405），禁 inline script；HTML 转义责任在 renderer 的 textContent。
+ *   7. 只读：全部端点是 GET，任何其它方法 405（下面请求流水线的 ③）；没有任何写入或命令执行端点，
+ *      本文件不 import child_process。
+ *
+ * 与 DESIGN §13.5 I5 的切分差异（两处条数不同但覆盖同一组防护，不是漂移，别再当漂移报一次）：
+ *   · DESIGN 数**六道**，把上面的 2 与 3 合并成一条「随机端口 + 每次启动随机 token」。本文件按实现
+ *     拆开：它们在代码里是两段独立逻辑（listen() 的 port 参数 vs createServer 里的 authToken），
+ *     各有各的落点，合写会让注释与代码结构脱节。tests/dashboard.test.mjs 的文件头同此七条切分，
+ *     并给出逐条到用例名的对照表（含唯一缺口：第 4 条的 absolute-form/400 分支目前无用例）。
+ *   · **两份清单都不含 preload**：原七道里的第七道「preload 只暴露最小 contextBridge API」已随
+ *     dashboard/preload.mjs 一起删除（sandbox: true 与 .mjs preload 互斥、renderer 零引用、删除不减少
+ *     保护面），是**一条无法验证的承诺被撤下**而非一道防护失效；理由见 DESIGN §13.5 I5 与
+ *     dashboard/README.md「为什么 Electron 壳不需要 preload」。本文件的第 7 条是「只读」，与 preload 无关。
+ *   · 下方请求流水线里的圈号是**执行顺序**标记（① 来源门 → ①bis 请求行 → ② CORS → ③ 只读 →
+ *     ④ 公开路径 → ⑤ token 门），与本清单的 1–7 编号无对应关系，不要按序号互相套。
  *
  * 鉴权分层（为什么静态壳不要 token）：
  *   浏览器只会把 token 带在首个地址栏请求上（?token=），随后对 <link href="/app.css"> 与
@@ -559,7 +578,9 @@ export function createServer({
       return;
     }
 
-    // ⑥ 数据端点（/api/*）：必须 token。这里才是唯一会吐出路径与任务内容的面。
+    // ⑤ 数据端点（/api/*）：必须 token。这里才是唯一会吐出路径与任务内容的面。
+    //    （圈号是流水线执行顺序，与文件头 I5 清单的 1–7 无关；此前写作 ⑥ 而序列里没有 ⑤，
+    //     看着像有一步被删过——实际没有，故补顺。）
     const auth = authResult(req, authToken);
     if (auth === 'missing') {
       writeHead(res, 401, {

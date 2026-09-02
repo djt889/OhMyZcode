@@ -1,8 +1,30 @@
 /**
  * tests/dashboard.test.mjs
- * 覆盖 dashboard/server.mjs：I5 七道防护（loopback / 随机端口 / token / CORS / SSE / CSP / 只读）
+ * 覆盖 dashboard/server.mjs 的 I5 防护，按 server.mjs 文件头的**七条代码结构切分**组织：
+ *   loopback / 随机端口 / 随机 token / CORS / SSE / CSP / 只读
  * + 双轨数据源（coordinator SQLite 优先、失败回退 .omz/ 文件视图）
  * + renderer 静态资产的无注入面断言。
+ *
+ * 逐条到用例的对照（避免"注释承诺了但没有用例"——preload 那道的原罪正是这个）：
+ *   1. loopback      → describe('isLoopbackRequest') 5 例 + describe('请求流水线：loopback 门（I5-1）') 3 例
+ *   2. 随机端口      → it('端口由系统分配（非 0 且 urlOf 带 token）') 断言 port > 0
+ *   3. 随机 token    → 同上例断言 token.length >= 32；+ describe('checkToken / safeEqual / authResult') 5 例
+ *                      + 真实 HTTP 的 401/403/200 三例
+ *   4. CORS 白名单   → describe('checkOrigin / originsFor') 3 例 + it('外部 Origin 的请求返回 403')
+ *                      ⚠️ **缺口**：server.mjs 第 4 条还含 checkRequestTarget() 的 absolute-form→400 分支
+ *                      （请求流水线 ①bis），本文件**没有**对应用例。这里如实记着，不当已覆盖论。
+ *   5. SSE 结构化    → describe('sseEncode') 6 例 + describe('SSE 真实连接') 断言 event: snapshot 且 data 可 JSON.parse
+ *   6. CSP           → it('安全头齐全：CSP default-src none + script-src self…') + it('404 与 405 响应同样带全套安全头')
+ *   7. 只读          → it('POST 请求返回 405 且带 Allow: GET（只读契约）') + it('DELETE / PUT 同样返回 405')
+ *
+ * 与 DESIGN §13.5 I5 的切分差异（条数不同但覆盖同一组防护，不是漂移）：
+ *   · DESIGN 数**六道**，把「随机端口」与「随机 token」合为一条；本文件与 server.mjs 文件头把二者
+ *     分列（端口来自 listen 的 port=0，token 来自 createServer 的 randomBytes(24)，断言也是分开的：
+ *     见上表第 2、3 条）。
+ *   · **本文件的七条不含 preload**：原七道里的第七道「preload 只暴露最小 contextBridge API」已随
+ *     dashboard/preload.mjs 一起删除（sandbox: true 与 .mjs preload 互斥、renderer 零引用、删除不减少
+ *     保护面），因此没有可断言的对象；本文件第七条是「只读」（405 用例）。详见 DESIGN §13.5 I5。
+ *
  * 端口一律用 0；每个真起服务的用例在 t.after 里 close()。
  */
 import { after, before, describe, it } from 'node:test';

@@ -492,12 +492,78 @@ function checkSupplyChain(pluginRoot, caps) {
     } else {
       out.push(check('supply:lock', '上游来源锁定', 'OK', `source=${v.source} commit=${v.commit} synced_at=${v.synced_at}`));
     }
-    const lic = v.license?.omo?.spdx;
-    out.push(
-      lic
-        ? check('supply:upstream-license', '上游许可证', 'OK', `omo spdx=${lic}`)
-        : check('supply:upstream-license', '上游许可证', 'FAIL', `上游 omo 许可证未核验（${v.license?.omo?.status ?? '无记录'}）——I6 要求许可证边界留档`, '修复：核验 oh-my-openagent 的 LICENSE 并回填 upstream/omo-sources.lock.json 的 license.omo.spdx')
+    /**
+     * 上游许可证取证。判据与 tools/sync-omo-skills.mjs 的 loadLock() **同源**：那侧看的是
+     * license.<key>.status（缺失即 ERROR/exit 1，/^unverified/ 报 WARN "未核验前禁止合并进 main"），
+     * 本项也以 status 为核验维度，只是严格度更高——同一个 unverified 在那侧是 WARN/exit 0，
+     * 在本项是 FAIL（doctor --supply-chain 是发布门，sync --check 是同步前的提示）。
+     * 本项此前**只看 spdx 是否 truthy**，于是两个工具的判据不同源，两个方向都会错：把 spdx 填成
+     * 任意非空字符串（包括写错的）就能转 OK；反过来把 status 改回 unverified 但留着 spdx，
+     * doctor 报 OK 而 sync --check 报 WARN。现在四项齐备才 OK：
+     *   ① status 以 verified 开头且不含 unverified（与 sync 侧同一字段、同一正则维度）；② spdx 非空；
+     *   ③④ verified_at + verified_via 存在——这两项是"可追溯"的凭据：只有 spdx 而没有取证痕迹，
+     *      等于一条无法复核的断言（谁、何时、用什么核的都不知道）。
+     * 只判 license.omo（本项标签就是"上游许可证"）；codegraph 的许可证记录由 lock 的
+     * license.codegraph 与 supply:codegraph 承担，它没有 verified_at/verified_via，不在本项判据内。
+     * **判据的已知边界**（别把它当强于实际）：四项齐备只证明"有人留下了可复核的取证痕迹"，
+     * 不证明 spdx 的值本身正确——把 spdx 写成错的协议名同时补齐 status/verified_at/verified_via
+     * 仍会转 OK。要判值的正确性只能联网比对上游 LICENSE，而 doctor 是离线检查（见文件头）。
+     */
+    const omo = v.license?.omo ?? null;
+    const licStatus = typeof omo?.status === 'string' ? omo.status.trim() : '';
+    const licSpdx = typeof omo?.spdx === 'string' ? omo.spdx.trim() : '';
+    const proofMissing = ['verified_at', 'verified_via'].filter(
+      (k) => typeof omo?.[k] !== 'string' || omo[k].trim() === ''
     );
+    const licFix =
+      '修复：核验上游许可证并回填 upstream/omo-sources.lock.json 的 license.omo——' +
+      'curl -s https://api.github.com/repos/code-yeongyu/oh-my-openagent/license' +
+      '（GitHub 对非标准协议只给 Other/NOASSERTION，仍需读仓库 LICENSE.md 原文确认协议名与关键条款）；' +
+      '需回填的字段：spdx、status="verified"、verified_at=<ISO 日期>、verified_via=<取证途径>。' +
+      '本项与 node tools/sync-omo-skills.mjs --check 判的是同一维度（status），但本项更严：' +
+      '那侧对 unverified 只报 WARN 且退出码仍 0，本项判 FAIL——发布门在这里。';
+    if (licStatus === '' || /unverified/i.test(licStatus) || !/^verified/i.test(licStatus)) {
+      out.push(
+        check(
+          'supply:upstream-license',
+          '上游许可证',
+          'FAIL',
+          `上游 omo 许可证未核验（status=${licStatus || '无记录'}${licSpdx ? `，但已填 spdx=${licSpdx}` : ''}）` +
+            '——I6 要求许可证边界留档；spdx 非空不等于已核验，status 才是核验维度（sync --check 对同一状态报 WARN）',
+          licFix
+        )
+      );
+    } else if (!licSpdx) {
+      out.push(
+        check(
+          'supply:upstream-license',
+          '上游许可证',
+          'FAIL',
+          `status=${licStatus} 已标已核验，但 license.omo.spdx 为空——协议名缺失，取证不完整`,
+          licFix
+        )
+      );
+    } else if (proofMissing.length) {
+      out.push(
+        check(
+          'supply:upstream-license',
+          '上游许可证',
+          'FAIL',
+          `omo spdx=${licSpdx} status=${licStatus}，但缺可追溯凭据：${proofMissing.join('、')}` +
+            '——只有 spdx 没有取证痕迹时无法复核（谁在何时用什么核的），视为手填',
+          licFix
+        )
+      );
+    } else {
+      out.push(
+        check(
+          'supply:upstream-license',
+          '上游许可证',
+          'OK',
+          `omo spdx=${licSpdx} status=${licStatus}（verified_at=${omo.verified_at}；verified_via=${omo.verified_via}）`
+        )
+      );
+    }
   }
 
   const pkg = readJsonSafe(path.join(pluginRoot, 'package.json'));
