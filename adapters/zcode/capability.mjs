@@ -147,8 +147,12 @@ export function probeGit(cwd) {
  * git 不可用时无法核对 HEAD/提交时间（DESIGN I1 要求核对），此时必须是 'unknown' 而不是 false ——
  * false 会让一个可能极旧的索引被当成新鲜索引使用，正是 I1 描述的事故。
  * error 保留字符串（兼容旧调用方），errors 数组累积**全部**原因，避免二进制原因盖掉索引目录原因。
+ *
+ * 第二参 `commandName` 只为测试注入。本机装了 codegraph 之后，"二进制不可用 + 索引目录缺失"
+ * 这个双原因场景在真实 PATH 上再也构造不出来，而它恰是「原因累积不互相覆盖」的回归靶子。
+ * 生产调用一律省略该参数。
  */
-export function probeCodegraph(cwd) {
+export function probeCodegraph(cwd, commandName = 'codegraph') {
   const out = {
     available: false,
     binary: null,
@@ -164,7 +168,7 @@ export function probeCodegraph(cwd) {
     out.error = out.errors.join('；');
   };
 
-  const bin = probeCommand('codegraph', ['--version'], { cwd });
+  const bin = probeCommand(commandName, ['--version'], { cwd });
   out.binary = bin.available ? bin.version : null;
   out.resolvedCommand = bin.resolvedCommand ?? null;
   if (!bin.available) pushErr(`codegraph 可执行文件不可用：${bin.error}`);

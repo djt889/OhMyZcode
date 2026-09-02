@@ -188,9 +188,14 @@ describe('probeGit', () => {
 });
 
 describe('probeCodegraph', () => {
-  it('无 codegraph 且无索引目录时 errors 累积多条原因（不是只报第一条）', () => {
+  /**
+   * 双原因场景（二进制不可用 + 索引目录缺失）用注入的假命令名构造，而不是依赖
+   * 「本机没装 codegraph」。装上 codegraph 之后真实 PATH 上再也造不出这个场景，
+   * 而它恰是「原因累积不互相覆盖」的唯一靶子——靠环境状态的断言等于随机失效。
+   */
+  it('二进制不可用且无索引目录时 errors 累积多条原因（不是只报第一条）', () => {
     const dir = makeDir('no-codegraph');
-    const r = probeCodegraph(dir);
+    const r = probeCodegraph(dir, 'codegraph-definitely-not-installed-xyz');
     assert.equal(r.available, false);
     assert.ok(Array.isArray(r.errors), 'errors 必须是数组');
     assert.ok(r.errors.length >= 2, `应累积多条原因，实际 ${r.errors.length} 条：${JSON.stringify(r.errors)}`);
@@ -198,6 +203,29 @@ describe('probeCodegraph', () => {
     assert.ok(r.errors.some((e) => /索引目录/.test(e)), '缺「索引目录缺失」原因——被二进制原因盖掉即为回归');
     // error 字符串是 errors 的拼接，兼容旧调用方
     assert.equal(r.error, r.errors.join('；'));
+  });
+
+  /**
+   * 默认参数（真实命令名）的探测结果必须与本机是否装了 codegraph 自洽：
+   * 装了就该报出版本、没装就该给出「不可用」原因。两种环境下都成立，不写死任何一种。
+   */
+  it('默认命令名的探测与本机安装状态自洽（装了报版本，没装报原因）', () => {
+    const r = probeCodegraph(makeDir('codegraph-real-probe'));
+    if (r.binary === null) {
+      assert.ok(
+        r.errors.some((e) => /可执行文件不可用/.test(e)),
+        `binary 为 null 时必须给出不可用原因：${JSON.stringify(r.errors)}`
+      );
+    } else {
+      assert.match(r.binary, /\d+\.\d+/, `装了 codegraph 就该带回版本号，实际 ${r.binary}`);
+      assert.ok(
+        !r.errors.some((e) => /可执行文件不可用/.test(e)),
+        '已探测到版本却仍报「可执行文件不可用」，自相矛盾'
+      );
+    }
+    // 无论装没装，临时目录里都没有索引，所以这条原因恒在、available 恒 false
+    assert.ok(r.errors.some((e) => /索引目录/.test(e)), '缺「索引目录缺失」原因');
+    assert.equal(r.available, false);
   });
 
   it('.codegraph 存在但不是目录时给出对应原因', () => {
