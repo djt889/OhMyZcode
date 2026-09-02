@@ -1,15 +1,19 @@
 {
   "name": "omz",
-  "version": "1.6.1",
-  "description": "Oh My ZCode — OmO 编排能力的 ZCode 移植：core（agents/commands/skills）+ 可选 graph/orchestration/dashboard profile",
-  "author": {
-    "name": "OMZ"
+  "version": "1.7.0",
+  "description": "Oh My ZCode — OmO 编排能力的 ZCode 移植：core（9 子代理 / 5 命令 / 4 skill）+ 可选 graph/orchestration/dashboard profile，默认全关",
+  "description_i18n": {
+    "en": "A ZCode port of oh-my-openagent's orchestration: 9 subagents, 5 commands and 4 skills in the always-on core, plus graph/orchestration/dashboard profiles that are off by default.",
+    "zh-CN": "OmO 编排能力的 ZCode 移植：core 常开（9 子代理 / 5 命令 / 4 skill），graph/orchestration/dashboard 三个 profile 默认全关。"
   },
+  "author": {
+    "name": "OMZ",
+    "url": "https://github.com/djt889/OhMyZcode"
+  },
+  "homepage": "https://github.com/djt889/OhMyZcode",
   "license": "MIT",
-  "agents": "agents",
   "commands": "commands",
   "skills": "skills",
-  "hooks": "hooks/hooks.json",
   "mcpServers": {
     "omz-coordinator": {
       "type": "stdio",

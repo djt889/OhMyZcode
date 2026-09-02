@@ -1,4 +1,5 @@
 ---
+name: ulw
 description: "ultrawork 模式：编排目标的全生命周期（规划→执行→双证据验证→评审门→提交）。用法 /ulw <目标>"
 ---
 

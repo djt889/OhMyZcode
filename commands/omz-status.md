@@ -1,4 +1,5 @@
 ---
+name: omz-status
 description: "OMZ 状态看板：渲染 .omz/ 的波次×任务×状态（40 行上限，超出聚合）"
 ---
 

@@ -26,8 +26,11 @@ Confirmed on the engine side: plugin hook parsing takes only `rawHooks.hooks` an
   `{ "keyword_hook": true }` in `.omz/config.json`), then restart the session. **You do not need to touch
   `hooks.json`.**
 - **To shut it off completely at the runtime layer**: add `"enabled": false` to the **element** inside the hooks
-  array, or remove the `hooks` declaration from `.zcode-plugin/plugin.json`. Setting the top-level `enabled` back
-  to `false` has no effect.
+  array, or delete `hooks/hooks.json`. Setting the top-level `enabled` back to `false` has no effect.
+  Removing a `hooks` declaration from `.zcode-plugin/plugin.json` is **not** a way to switch it off: the manifest
+  has not declared hooks since 1.7.0, because the engine auto-discovers exactly `<root>/hooks/hooks.json`
+  (`listPluginHookSources`), and declaring the same realpath again only earns a `Duplicate plugin hooks file
+  ignored` warning while the auto-discovered entry keeps running.
 
 ## The fixed cost once enabled: one node process per message
 

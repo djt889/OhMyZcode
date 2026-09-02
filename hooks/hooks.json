@@ -7,6 +7,7 @@
     "由 keyword-detect.mjs 内的语义闸把关：config.keyword_hook !== true 时立即返回 {}（DESIGN §15.5 的产品默认值）。",
     "取舍：用户只改项目配置（keyword_hook: true）即可启用，不必编辑插件文件；代价是未启用时每条消息仍付约 126-132ms 的空跑成本。",
     "若改成元素级 enabled:false，hook 根本不会启动，语义闸永不触及，两道开关退化为一道死开关，启用需改插件文件——故不采用。",
+    "本文件由引擎自动发现（listPluginHookSources 先查 <root>/hooks/hooks.json），所以 .zcode-plugin/plugin.json 自 1.7.0 起不再声明 hooks——同一 realpath 声明两次会得到 Duplicate plugin hooks file ignored warning。",
     "timeoutMs 是元素级字段，引擎确实读取（tests/hooks.test.mjs 断言 SCAN_BUDGET_MS 相对它留一半余量），不要动。"
   ],
   "hooks": {

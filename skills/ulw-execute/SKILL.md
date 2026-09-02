@@ -1,6 +1,6 @@
 ---
 name: ulw-execute
-description: "仅当存在已定稿的 .omz/plans/<slug>.md 且用户/主 agent 要求按计划逐波执行时激活;或用户/主 agent 要求按计划执行但计划不存在(走 No-plan bootstrap 反向调 ulw-plan 补计划)。用于 Atlas 执行会话与 /ulw 执行步骤(当前 commands/ulw.md 第六步)的执行编排;不得空中执行,普通问答与单文件 quick 小改不得激活。"
+description: "仅当用户/主 agent 要求按已定稿的 .omz/plans/<slug>.md 逐波执行时激活（计划缺失则先反向调 ulw-plan 补计划）;不得空中执行,普通问答与单文件 quick 小改不得激活。"
 ---
 
 # ulw-execute — 计划执行编排协议

@@ -4,7 +4,7 @@
 
 > **许可证边界**：本仓库以 MIT 分发（`LICENSE` 只含本项目自身的 MIT 全文）。上游 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 采用 **Sustainable Use License 1.0**（非 OSI 协议，限定为自有内部业务用途或非商业/个人用途）。该许可证已核实，并连同逐字重叠度分析一起记录在 `upstream/omo-sources.lock.json`：与上游四个 `SKILL.md` 的 15,824 个 8-gram 比对，共享 8-gram 仅 9 个，且全部来自同一处 JSON 枚举行。两个许可证之间的边界如何判断属项目所有者的决定，`upstream/` 只做取证记录。
 
-对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.zh-CN.md](./DESIGN.zh-CN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)（当前 1.6.1）。
+对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.zh-CN.md](./DESIGN.zh-CN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)（当前 1.7.0）。
 
 ## 定位
 
@@ -23,16 +23,38 @@
 
 同一张图还有独立的交互页面 `docs/omz-architecture.zh-CN.html`——克隆或下载仓库后用浏览器打开（GitHub 不内联渲染仓库里的 HTML）。页面带四条导览视图（默认 `core` 路径、DAG 调度、语义检索、三条回退链）、点击任一组件聚焦、以及指回本仓库的源码引用。同一结构的文字版是 DESIGN §3.1 与 §3.3；产物如何生成与验证见 [docs/README.zh-CN.md](./docs/README.zh-CN.md)。
 
-## 安装（core profile，默认）
+## 安装
 
-1. 将整个 `omz/` 目录作为 ZCode 插件放置（含 `.zcode-plugin/plugin.json`）。清单声明 `agents` / `commands` / `skills` / `hooks`（`hooks/hooks.json`；hook 本身注册即启用，是否真的注入由语义闸 `omz.keyword_hook` 决定，**默认关闭**，见下）与一个默认关闭的 `mcpServers.omz-coordinator`；路径变量统一用 `${ZCODE_PLUGIN_ROOT}` 与 `${ZCODE_PROJECT_DIR}`。
-2. **重启会话 / 新开会话**——agent 清单是会话启动时的快照（DESIGN §13 B19），不重启则子代理不可见。
-3. `/omz-doctor` 自检：应显示 9 个 omz agent 全部可 spawn、frontmatter/model 校验通过、`.omz/` 已在 `.gitignore`。离线等价物是 `npm run doctor`——注意它只做静态校验，spawn ping 必须在会话内跑（DESIGN §10.1 V12，该项已在 v1.5 装机验收中结清：真实会话内 9/9 返回暗语）。
-4. 冒烟：`/ulw 一个跨 2 文件的小特性`。
+### 从市场安装（推荐）
+
+OMZ 自带市场索引 `.claude-plugin/marketplace.json`，所以 ZCode 的安装、更新、启用/禁用走的是**和官方插件完全同一条代码路径**。添加一次市场，然后装：
+
+```
+/plugin marketplace add djt889/OhMyZcode
+/plugin install omz@omz-marketplace
+```
+
+ZCode 优先走 GitHub tarball API 取源（本机不需要装 `git`），只有那条路不可用时才回退 `git clone`。条目把 `ref` 钉在 `v<version>` tag 上，所以拿到的是发布时那棵树，而不是 `main` 当前的样子。
+
+装完**重启会话或新开会话**——agent 清单是会话启动时的快照（DESIGN §13 B19），不重启则子代理不可见。然后跑 `/omz-doctor`。
+
+装机预期是**零诊断**：`zcode plugins list --verbose` 对 `omz` 不应出现任何 warning 或 error 行。若出现了，那是缺陷，请带上原文开 issue。
+
+### 从本地检出安装
+
+克隆仓库后把 ZCode 的 `plugins.dirs` 指向该目录，或直接放进插件目录。行为完全相同；想自己改协议文本时用这种方式。
+
+### 两种方式都一样的部分
+
+1. **重启会话**（见上）。
+2. `/omz-doctor` 自检：应显示 9 个 omz agent 全部可 spawn、frontmatter/model 校验通过、`.omz/` 已在 `.gitignore`。离线等价物是 `npm run doctor`——注意它只做静态校验，spawn ping 必须在会话内跑（DESIGN §10.1 V12，该项已在 v1.5 装机验收中结清：真实会话内 9/9 返回暗语）。
+3. 冒烟：`/ulw 一个跨 2 文件的小特性`。
+
+清单声明 `commands` 与 `skills`，加一个默认关闭的 `mcpServers.omz-coordinator`；路径变量统一用 `${ZCODE_PLUGIN_ROOT}` 与 `${ZCODE_PROJECT_DIR}`。有两样东西**有意不声明**：9 个子代理（引擎靠扫 `agents/*.md` 目录加载，清单里写 `agents` 只换来一条 `plugin_unsupported_component` warning——该键在本运行时是诊断-only 的）与 `hooks/hooks.json`（引擎会自动发现这个确切路径，再声明一遍会得到 `Duplicate plugin hooks file ignored` warning）。两条都有测试钉住，回不来。
 
 需要 **Node >= 22.13**（coordinator 与 dashboard 用内置 `node:sqlite`，零原生依赖）。这个下限不是保守取整：22.5–22.12 上 `node:sqlite` 在 `--experimental-sqlite` flag 之后，直接 import 会 `ERR_UNKNOWN_BUILTIN_MODULE` **崩栈退出**（实测：coordinator 与 dashboard 立即挂，只有 core 能用），22.13.0 起才默认可用。全仓库零第三方运行时依赖。
 
-`package.json` 标了 `private: true`：OMZ **仅作 ZCode 插件分发（git clone / 插件目录放置），不发布到 npm**。该字段只阻止 `npm publish`，不影响 git 发布与插件装载。
+`package.json` 标了 `private: true`：OMZ **作 ZCode 插件分发（自建市场 / git clone / 插件目录放置），不发布到 npm**。该字段只阻止 `npm publish`，不影响市场安装、git 发布与插件装载。
 
 **安装 OMZ 不改变 ZCode 默认聊天行为。** 这是产品承诺（DESIGN §15），不是"通常如此"：
 
@@ -89,7 +111,7 @@
 ## 开发与测试
 
 ```bash
-npm test                  # 全部测试：573 用例 / 102 suites（等价 node --test tests/）
+npm test                  # 全部测试：577 用例 / 102 suites（等价 node --test tests/）
 node --test tests/        # 同上；单文件如 node --test tests/protocol.test.mjs
 npm run test:protocol     # 分文件脚本（9 个）：path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
                           # capability 与 cli 无独立脚本，用 node --test tests/<file> 单跑

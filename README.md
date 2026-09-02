@@ -4,7 +4,7 @@
 
 > **License boundary**: This repository is distributed under MIT (`LICENSE` contains only the full MIT text of this project itself). The upstream project [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) is under the **Sustainable Use License 1.0** (not an OSI license; it limits use to your own internal business purposes or to non-commercial/personal use). That license has been verified and is recorded, together with a verbatim overlap analysis, in `upstream/omo-sources.lock.json`: against the 15,824 8-grams of the four upstream `SKILL.md` files, only 9 8-grams are shared, and all 9 come from one and the same JSON enum line. How the boundary between the two licenses is to be judged is the project owner's decision; `upstream/` only records evidence.
 
-A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.6.1).
+A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.7.0).
 
 ## Purpose
 
@@ -23,16 +23,38 @@ Only the execution layer is always present — that is the `core` profile. The o
 
 The same diagram is also a standalone interactive page, `docs/omz-architecture.html` — clone or download the repository and open it in a browser (GitHub does not render repository HTML inline). It carries four guided views (the default `core` path, DAG scheduling, semantic retrieval, and the three fallback chains), click-to-focus on any component, and source references back into this repository. The narrative version of the same structure is DESIGN §3.1 and §3.3; how the artifact is generated and verified is described in [docs/README.md](./docs/README.md).
 
-## Installation (core profile, the default)
+## Installation
 
-1. Place the whole `omz/` directory as a ZCode plugin (it contains `.zcode-plugin/plugin.json`). The manifest declares `agents` / `commands` / `skills` / `hooks` (`hooks/hooks.json`; a hook is enabled as soon as it is registered, while whether it actually injects is decided by the semantic gate `omz.keyword_hook`, which is **off by default**, see below) plus one `mcpServers.omz-coordinator` that is disabled by default; path variables uniformly use `${ZCODE_PLUGIN_ROOT}` and `${ZCODE_PROJECT_DIR}`.
-2. **Restart the session / open a new session** — the agent manifest is a snapshot taken at session start (DESIGN §13 B19); without a restart the subagents are invisible.
-3. `/omz-doctor` self-check: it should show that all 9 omz agents can be spawned, that frontmatter/model validation passes, and that `.omz/` is already in `.gitignore`. The offline equivalent is `npm run doctor` — note that it only performs static validation; the spawn ping must be run inside a session (DESIGN §10.1 V12, an item already closed out in the v1.5 installed-environment acceptance: inside a real session, 9/9 returned the passphrase).
-4. Smoke test: `/ulw a small feature spanning 2 files`.
+### From the marketplace (recommended)
+
+OMZ ships its own marketplace index at `.claude-plugin/marketplace.json`, so ZCode can install, update, enable and disable it through exactly the same code path it uses for official plugins. Add the marketplace once, then install:
+
+```
+/plugin marketplace add djt889/OhMyZcode
+/plugin install omz@omz-marketplace
+```
+
+ZCode resolves the source through the GitHub tarball API first (no local `git` needed) and falls back to `git clone` only when that is unavailable. The entry pins `ref` to the `v<version>` tag, so you get the tree as it was released rather than whatever `main` happens to be.
+
+After installing, **restart the session or open a new one** — the agent manifest is a snapshot taken at session start (DESIGN §13 B19), so without a restart the subagents stay invisible. Then run `/omz-doctor`.
+
+Installation is expected to be **diagnostic-free**: `zcode plugins list --verbose` should report no warning or error line for `omz`. If it reports one, that is a defect — please open an issue with the exact line.
+
+### From a local checkout
+
+Clone the repository and point ZCode's `plugins.dirs` at the directory, or drop it into the plugin directory. Identical behaviour; useful when you want to edit the protocol text yourself.
+
+### Either way
+
+1. **Restart the session** (see above).
+2. `/omz-doctor` self-check: it should show that all 9 omz agents can be spawned, that frontmatter/model validation passes, and that `.omz/` is already in `.gitignore`. The offline equivalent is `npm run doctor` — note that it only performs static validation; the spawn ping must be run inside a session (DESIGN §10.1 V12, an item already closed out in the v1.5 installed-environment acceptance: inside a real session, 9/9 returned the passphrase).
+3. Smoke test: `/ulw a small feature spanning 2 files`.
+
+The manifest declares `commands` and `skills` plus one `mcpServers.omz-coordinator` that is disabled by default; path variables uniformly use `${ZCODE_PLUGIN_ROOT}` and `${ZCODE_PROJECT_DIR}`. Two things are **deliberately not declared**: the 9 subagents (the engine loads them by scanning `agents/*.md`; declaring `agents` in the manifest only earns a `plugin_unsupported_component` warning, because that key is diagnostic-only in this runtime) and `hooks/hooks.json` (the engine auto-discovers that exact path, so declaring it too produces a `Duplicate plugin hooks file ignored` warning). Both are asserted by tests so they cannot creep back in.
 
 Requires **Node >= 22.13** (the coordinator and the dashboard use the built-in `node:sqlite`, zero native dependencies). This lower bound is not conservative rounding: on 22.5–22.12, `node:sqlite` sits behind the `--experimental-sqlite` flag, and importing it directly **crashes with a stack trace and exits** on `ERR_UNKNOWN_BUILTIN_MODULE` (empirically verified: the coordinator and the dashboard die immediately, only core is usable); it is available by default only from 22.13.0 on. The whole repository has zero third-party runtime dependencies.
 
-`package.json` is marked `private: true`: OMZ is **distributed only as a ZCode plugin (git clone / placement in the plugin directory) and is not published to npm**. That field only blocks `npm publish`; it does not affect git-based distribution or plugin loading.
+`package.json` is marked `private: true`: OMZ is **distributed as a ZCode plugin (its own marketplace, git clone, or placement in the plugin directory) and is not published to npm**. That field only blocks `npm publish`; it does not affect the marketplace, git-based distribution, or plugin loading.
 
 **Installing OMZ does not change ZCode's default chat behavior.** This is a product promise (DESIGN §15), not a "usually the case":
 
@@ -89,7 +111,7 @@ Each layer can be turned off individually; a failure only degrades the correspon
 ## Development and testing
 
 ```bash
-npm test                  # All tests: 573 cases / 102 suites (equivalent to node --test tests/)
+npm test                  # All tests: 577 cases / 102 suites (equivalent to node --test tests/)
 node --test tests/        # Same as above; a single file, e.g. node --test tests/protocol.test.mjs
 npm run test:protocol     # Per-file scripts (9): path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
                           # capability and cli have no dedicated script; run them one by one with node --test tests/<file>

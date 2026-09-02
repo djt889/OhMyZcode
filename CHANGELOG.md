@@ -4,8 +4,9 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.6.1** ↔
-DESIGN **v1.5** (1.6.0 and 1.6.1 are documentation and defect-fix releases; neither changes the design spec).
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.7.0** ↔
+DESIGN **v1.5** (1.6.0, 1.6.1 and 1.7.0 are documentation, packaging and defect-fix releases; none changes the design
+spec).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -21,6 +22,74 @@ settled by the 1.5.0 installed-environment acceptance (six items → five).
 Every entry records three things: **Scope** (what was delivered), **Verification** (how it was proven to work, with
 reproducible numbers), and **Known gaps** (what was still missing at the time). All numbers are taken from actual run
 output on Node v22.14.0 / Windows on 2026-09-01.
+
+---
+
+## 1.7.0 — Installable from its own marketplace, with a diagnostic-free install (2026-09-02)
+
+**Scope**
+
+- **A self-hosted marketplace index, `.claude-plugin/marketplace.json`.** ZCode discovers that exact path
+  (`.claude-plugin/marketplace.json` → `marketplace.json`, engine constant `JRo`), so `/plugin marketplace add
+  djt889/OhMyZcode` followed by `/plugin install omz@omz-marketplace` runs through **the same
+  `installMarketplacePlugin` code path the official marketplace uses** — including update, enable and disable. The
+  official `zcode-plugins-official` marketplace is not an option here: its source is Z.ai's CDN and every entry has
+  `source: "filesystem"` pointing at directories shipped inside the client, so it has no submission path.
+  The entry uses `source: "github"` rather than `"git"`: `resolveRepositoryPluginSource` tries the GitHub tarball API
+  first (`requireSingleRoot` + `stripRoot`, **no local `git` needed**) and falls back to `git clone` only on
+  401/403/404 or a submodule/LFS repository. `ref` is pinned to the `v<version>` tag, so an install gets the released
+  tree rather than whatever `main` currently is. `sha` is deliberately absent and that is not an oversight: this index
+  lives in the same repository as the payload it pins, so writing its own commit sha would be self-referential and
+  unknowable before the commit exists — the engine's pin is `sha ?? ref`, and the tag already fills that role.
+- **A diagnostic-free install, verified by running the engine rather than by reading it.** `zcode plugins list
+  --verbose` used to print two warnings for `omz`; it now prints none. Both had the same shape — the manifest
+  declaring something the engine already handles:
+  1. `"agents": "agents"` → `plugin_unsupported_component: Plugin component is diagnostic-only in this ZCode
+     runtime: agents`. The engine's `ZMo()` warns for every key in `["agents","channels","lspServers",
+     "outputStyles","settings"]`. Subagents were never loaded from that declaration: `loadPluginAgentProfiles` scans
+     `<root>/agents/*.md` directly. Removing the key changes nothing about the 9 subagents and removes the warning.
+  2. `"hooks": "hooks/hooks.json"` → `plugin_hook_invalid: Duplicate plugin hooks file ignored`.
+     `listPluginHookSources` **auto-discovers exactly that path first**, then reads the manifest key; identical
+     realpaths make the second one a discarded duplicate. The auto-discovered entry was always the live one.
+  Both removals are now asserted by tests, so they cannot creep back in.
+- **Marketplace listing metadata.** `displayName`, `displayName_i18n`, `description_i18n`, `category`, `tags`,
+  `homepage`, `author.url`, `examplePrompts` and `examplePrompts_i18n` — the fields the engine's `Cee()` actually
+  reads into a plugin card. The listing states up front that OMZ registers one `UserPromptSubmit` hook whose
+  injection is gated off by default, because a user reading only the card should not be surprised by a hook.
+- **Five commands now declare `name` explicitly.** The engine's `readMarkdownFrontmatter` reads only `name` and
+  `description`, falling back to the filename when `name` is absent. Declaring it decouples the command name from the
+  filename, so renaming a file cannot silently change what users type.
+- **`ulw-execute`'s skill description: 204 → 103 characters**, keeping the strict activation clause. Skill
+  descriptions sit in the discovery context permanently; this one was carrying the `/ulw` step number and the Atlas
+  session mention, neither of which affects whether the skill should activate.
+
+**Verification**
+
+`npm test` **577 tests / 102 suites, 0 failures** (573 before: four new cross-file contract assertions).
+**Mutation-tested, because four green assertions prove nothing on their own** — seven mutations, each reverted
+immediately, each turning the suite red exactly once: re-adding `agents` to the manifest; re-adding the `hooks`
+declaration; a marketplace entry version that disagrees with `plugin.json`; `source: "git"` instead of `"github"`;
+`ref: "main"` instead of the tag; deleting a command's `name`; a command `name` that disagrees with its filename.
+Baseline and post-restore both `fail=0`.
+
+Engine-level verification, run against this exact tree: `zcode plugins list --verbose` reports **no warning and no
+error** for `omz` while still reporting `skills: 4, commands: 1, hooks: 1, mcp: plugin:omz:omz-coordinator`;
+`zcode commands list` still lists all 5 commands; `zcode skills list` still lists all 4 skills under both the
+namespaced and the bare alias. So removing the two manifest keys cost no capability. `node tools/doctor.mjs`
+reports no FAIL, `node tools/validate-frontmatter.mjs .` passes, `hook:self-test` 30/30.
+
+**Known gaps**
+
+- The `claude-plugins-official` marketplace (286 entries, `git-subdir` sources, accepts PRs) ships an automated
+  security review in `.github/policy/`. OMZ **would fail it as it stands**: the policy sets
+  `has_broad_scope_hooks=true` for any `UserPromptSubmit` hook without a *project-relevance* gate, and `passes=false`
+  follows from that alone. OMZ's matcher is a keyword gate, not a project gate — and on `UserPromptSubmit` the engine
+  does not filter on matcher at all, so the process starts on every message. Everything else in that policy is
+  already clean: no network call anywhere in the hook, no telemetry, no credential access, no downloaded software,
+  and a description that discloses the hook. Submitting there would mean shipping the hook as a separate plugin.
+- The upstream Sustainable Use License 1.0 versus this repository's MIT boundary is still a legal judgement for the
+  project owner; `upstream/omo-sources.lock.json` records evidence only.
+- The five items of §10.2 that need a real environment (V3/V4/V8′/V10/V11) are untouched by this round.
 
 ---
 

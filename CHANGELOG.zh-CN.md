@@ -2,11 +2,39 @@
 
 # OMZ 实现变更日志
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.6.1** ↔ DESIGN **v1.5**（1.6.0 与 1.6.1 都是文档与缺陷修复版本，均未改动设计规格）。
+**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.7.0** ↔ DESIGN **v1.5**（1.6.0、1.6.1、1.7.0 都是文档、打包与缺陷修复版本，均未改动设计规格）。
 
 **跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
 
 每个条目记录三件事：**范围**（交付了什么）、**验证**（怎么证明它工作，用可复现的数字）、**已知缺口**（当时还没有的）。数字均取自 2026-09-01 在 Node v22.14.0 / Windows 上的实际运行输出。
+
+---
+
+## 1.7.0 — 可从自建市场安装，装机零诊断（2026-09-02）
+
+**范围**
+
+- **自建市场索引 `.claude-plugin/marketplace.json`。** ZCode 就按这个确切路径发现市场（`.claude-plugin/marketplace.json` → `marketplace.json`，引擎常量 `JRo`），所以 `/plugin marketplace add djt889/OhMyZcode` 之后 `/plugin install omz@omz-marketplace`，走的是**和官方市场同一条 `installMarketplacePlugin` 代码路径**——更新、启用、禁用一并如此。官方 `zcode-plugins-official` 市场不是选项：它的源是 Z.ai 的 CDN，每个条目都是 `source: "filesystem"` 指向随客户端分发的目录，没有投稿入口。
+  条目用 `source: "github"` 而不是 `"git"`：`resolveRepositoryPluginSource` 先试 GitHub tarball API（`requireSingleRoot` + `stripRoot`，**本机不需要装 `git`**），只有 401/403/404 或含 submodule/LFS 时才回退 `git clone`。`ref` 钉在 `v<version>` tag 上，所以装到的是发布时那棵树，而不是 `main` 当前的样子。`sha` 有意不写，且这不是疏漏：本索引与它所钉的负载在同一个仓库里，写自身所在 commit 的 sha 是自指的、提交前无法得知——引擎的 pin 是 `sha ?? ref`，tag 已经承担了这个角色。
+- **装机零诊断，靠跑引擎验证而不是读文档。** `zcode plugins list --verbose` 此前对 `omz` 打两条 warning，现在一条都没有。两条同一个形状——清单声明了引擎本来就自己处理的东西：
+  1. `"agents": "agents"` → `plugin_unsupported_component: Plugin component is diagnostic-only in this ZCode runtime: agents`。引擎的 `ZMo()` 对 `["agents","channels","lspServers","outputStyles","settings"]` 里出现的每个键都推一条 warning。子代理从来不是靠这条声明加载的：`loadPluginAgentProfiles` 直接扫 `<root>/agents/*.md`。删掉这个键对 9 个子代理毫无影响，warning 消失。
+  2. `"hooks": "hooks/hooks.json"` → `plugin_hook_invalid: Duplicate plugin hooks file ignored`。`listPluginHookSources` **先自动发现这个确切路径**，再读清单键；realpath 相同时第二条被当重复项丢弃。真正生效的一直是自动发现那条。
+  两处删除都有测试钉住，回不来。
+- **市场展示元数据。** `displayName`、`displayName_i18n`、`description_i18n`、`category`、`tags`、`homepage`、`author.url`、`examplePrompts`、`examplePrompts_i18n`——引擎的 `Cee()` 实际读进插件卡片的那些字段。卡片文案开门见山写明 OMZ 会注册一个 `UserPromptSubmit` hook 且其注入默认关闭，因为只看卡片的用户不该被一个 hook 惊到。
+- **5 个命令显式声明 `name`。** 引擎的 `readMarkdownFrontmatter` 只取 `name` 与 `description`，缺 `name` 就回落到文件名。显式写它把「命令名」与「文件名」解耦，重命名文件不会悄悄改掉用户打的命令。
+- **`ulw-execute` 的 skill description：204 → 103 字符**，严格触发从句保留。skill description 是长期占着发现上下文的；这条原来带着 `/ulw` 的步骤序号与 Atlas 会话提法，两者都不影响「该不该激活」。
+
+**验证**
+
+`npm test` **577 tests / 102 suites，0 失败**（此前 573：新增四条跨文件契约断言）。**做了变异测试，因为四条绿断言本身不证明任何事**——七个变异，每个立刻还原，每个都恰好让套件变红一次：清单加回 `agents`；加回 `hooks` 声明；市场条目版本与 `plugin.json` 不一致；`source` 改 `"git"`；`ref` 改 `"main"`；删掉某命令的 `name`；命令 `name` 与文件名不一致。基线与还原后均 `fail=0`。
+
+引擎层验证，针对当前这棵树实跑：`zcode plugins list --verbose` 对 `omz` **零 warning 零 error**，同时仍报 `skills: 4, commands: 1, hooks: 1, mcp: plugin:omz:omz-coordinator`；`zcode commands list` 仍列出全部 5 个命令；`zcode skills list` 仍以命名空间名与裸别名两种形式列出全部 4 个 skill。所以删掉那两个清单键没有损失任何能力。`node tools/doctor.mjs` 无 FAIL，`node tools/validate-frontmatter.mjs .` 通过，`hook:self-test` 30/30。
+
+**已知缺口**
+
+- `claude-plugins-official` 市场（286 条目、`git-subdir` 源、接受 PR）在 `.github/policy/` 里带一套自动化安全评审。**OMZ 现状会被它判不通过**：策略对任何没有*项目相关性*闸的 `UserPromptSubmit` hook 判 `has_broad_scope_hooks=true`，而 `passes=false` 单凭这一条即成立。OMZ 那个 matcher 是关键词闸不是项目闸——而且在 `UserPromptSubmit` 上引擎根本不按 matcher 过滤，进程每条消息都启动。该策略的其余各项都已干净：hook 内零网络调用、零遥测、零凭据访问、不下载软件，描述也披露了 hook。想投那个市场，就得把 hook 作为独立插件分发。
+- 上游 Sustainable Use License 1.0 与本仓库 MIT 之间的边界仍是项目所有者的法律判断；`upstream/omo-sources.lock.json` 只做取证记录。
+- §10.2 里依赖真实环境的五项（V3/V4/V8′/V10/V11）本轮未触碰。
 
 ---
 

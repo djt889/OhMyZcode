@@ -560,12 +560,74 @@ describe('跨文件契约一致性', () => {
     }
   });
 
-  it('plugin.json 声明的 agents/commands/skills/hooks 路径都真实存在', () => {
+  it('plugin.json 声明的 commands/skills 路径都真实存在', () => {
     const manifest = JSON.parse(readText(path.join(ROOT, '.zcode-plugin', 'plugin.json')));
-    for (const key of ['agents', 'commands', 'skills', 'hooks']) {
+    for (const key of ['commands', 'skills']) {
       const value = manifest[key];
       assert.equal(typeof value, 'string', `plugin.json 缺 ${key}`);
       assert.equal(fs.existsSync(path.resolve(ROOT, value)), true, `plugin.json 的 ${key}=${value} 不存在`);
+    }
+  });
+
+  /**
+   * 引擎的 ZMo() 对清单里出现的每个「诊断-only 组件」键推一条 plugin_unsupported_component
+   * warning（常量 $Mo/n5o = agents/channels/lspServers/outputStyles/settings）。
+   * agents 尤其容易误加：子代理确实能用，但那是 loadPluginAgentProfiles 从 <root>/agents/*.md
+   * 目录扫出来的，与清单声明无关——写进清单只换来一条 warning。
+   * 实测依据：写了 "agents" 时 `zcode plugins list --verbose` 报
+   * "Plugin component is diagnostic-only in this ZCode runtime: agents"，删掉后归零。
+   */
+  it('plugin.json 不含引擎判为「诊断-only」的组件键（装机零 warning）', () => {
+    const manifest = JSON.parse(readText(path.join(ROOT, '.zcode-plugin', 'plugin.json')));
+    const diagnosticOnly = ['agents', 'channels', 'lspServers', 'outputStyles', 'settings'];
+    const hit = diagnosticOnly.filter((key) => key in manifest);
+    assert.deepEqual(hit, [], `这些键会让引擎报 plugin_unsupported_component warning：${hit.join(', ')}`);
+  });
+
+  /**
+   * 引擎的 listPluginHookSources 先按 join(rootPath, 'hooks', 'hooks.json') **自动发现**，
+   * 再读清单的 hooks 键；两者 realpath 相同即报 plugin_hook_invalid
+   * "Duplicate plugin hooks file ignored"（该条被忽略，自动发现那条仍生效）。
+   * 所以 hooks/hooks.json 存在时清单**不能**再声明它。
+   */
+  it('hooks/hooks.json 走引擎自动发现，清单不得重复声明（否则 Duplicate warning）', () => {
+    const manifest = JSON.parse(readText(path.join(ROOT, '.zcode-plugin', 'plugin.json')));
+    const autoDiscovered = path.join(ROOT, 'hooks', 'hooks.json');
+    assert.equal(fs.existsSync(autoDiscovered), true, 'hooks/hooks.json 不存在——自动发现路径断了');
+    assert.equal(
+      'hooks' in manifest,
+      false,
+      'hooks/hooks.json 已被引擎自动发现，清单再声明会产生 Duplicate plugin hooks file ignored warning'
+    );
+  });
+
+  /**
+   * 自建市场索引：引擎按 .claude-plugin/marketplace.json → marketplace.json 顺序发现（Not()/JRo）。
+   * 条目 name/version 必须与插件清单同源，否则安装时 f5o() 抛
+   * "Plugin manifest name does not match marketplace entry"。
+   */
+  it('marketplace.json 的条目与 plugin.json 同源（name/version 一致）', () => {
+    const marketFile = path.join(ROOT, '.claude-plugin', 'marketplace.json');
+    assert.equal(fs.existsSync(marketFile), true, '缺 .claude-plugin/marketplace.json');
+    const market = JSON.parse(readText(marketFile));
+    const manifest = JSON.parse(readText(path.join(ROOT, '.zcode-plugin', 'plugin.json')));
+    const entry = market.plugins.find((p) => p.name === manifest.name);
+    assert.ok(entry, `marketplace.json 里没有 name=${manifest.name} 的条目`);
+    assert.equal(entry.version, manifest.version, 'marketplace 条目版本与 plugin.json 不一致');
+    assert.equal(entry.source?.source, 'github', 'source.source 应为 github（引擎优先走 tarball API，无需本机 git）');
+    assert.equal(entry.source?.ref, `v${manifest.version}`, 'source.ref 应钉到 v<version> tag');
+  });
+
+  /**
+   * 引擎的 readMarkdownFrontmatter 只取 name/description 两键；缺 name 时命令名回落到文件名。
+   * 显式写 name 才能让「命令名」与「文件名」解耦——重命名文件不会悄悄改掉用户打的命令。
+   */
+  it('每个 command 都显式声明 name 且与文件名一致', () => {
+    for (const file of fs.readdirSync(COMMANDS_DIR).filter((n) => n.endsWith('.md'))) {
+      const fm = parseFrontmatter(readText(path.join(COMMANDS_DIR, file)));
+      const stem = file.replace(/\.md$/, '');
+      assert.equal(typeof fm?.name, 'string', `${file}: 缺 frontmatter name`);
+      assert.equal(fm.name, stem, `${file}: name(${fm.name}) 与文件名不一致`);
     }
   });
 

@@ -1,4 +1,5 @@
 ---
+name: omz-doctor
 description: "OMZ 自检：agent 可达性(spawn ping)、model 校验、gitignore、mtime(B19)、BOM 扫描(B4)"
 ---
 

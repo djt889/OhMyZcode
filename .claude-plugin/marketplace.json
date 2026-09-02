@@ -1,0 +1,70 @@
+{
+  "$schema_note": [
+    "OMZ 自建插件市场索引。引擎按 .claude-plugin/marketplace.json → marketplace.json 顺序发现本文件",
+    "（zcode.cjs 的 Not() / JRo 常量），所以路径与文件名都不能改。",
+    "",
+    "用户侧只需添加一次市场源 djt889/OhMyZcode，之后在 /plugin 界面里搜索、安装、更新、",
+    "启用/禁用都走引擎自己的 installMarketplacePlugin，与官方市场同一条代码路径。",
+    "",
+    "source 选 github 而不是 git：引擎的 resolveRepositoryPluginSource 先试 GitHub tarball API",
+    "（requireSingleRoot + stripRoot，无需本机 git），只有 401/403/404 或 submodule/LFS 才回退",
+    "git clone。tarball 路径对没装 git 的用户也成立。",
+    "",
+    "ref 指向 tag 而不是 main：tag 是本仓库里可复现的稳定锚点，装到的一定是发布时那棵树。",
+    "sha 字段有意不写——不是疏漏：本文件与它所钉的插件负载在同一个仓库，写自身所在 commit 的",
+    "sha 是自指的，无法在提交前得知。引擎的 pin = sha ?? ref，tag 已经承担了这个角色。",
+    "若将来把市场索引拆到独立仓库，再补 sha 才有意义。"
+  ],
+  "name": "omz-marketplace",
+  "version": 1,
+  "description": "Oh My ZCode (OMZ): multi-agent orchestration for ZCode — parallel throughput, specialized roles, independent review with dual evidence, and interview-driven planning.",
+  "description_i18n": {
+    "en": "Oh My ZCode (OMZ): multi-agent orchestration for ZCode — parallel throughput, specialized roles, independent review with dual evidence, and interview-driven planning.",
+    "zh-CN": "Oh My ZCode（OMZ）：ZCode 上的多代理编排——并行吞吐、角色专业分工、独立评审与双证据、访谈式规划。"
+  },
+  "owner": {
+    "name": "OMZ",
+    "url": "https://github.com/djt889/OhMyZcode"
+  },
+  "plugins": [
+    {
+      "name": "omz",
+      "version": "1.7.0",
+      "displayName": "Oh My ZCode",
+      "displayName_i18n": {
+        "zh-CN": "Oh My ZCode"
+      },
+      "description": "Multi-agent orchestration: 9 subagents, /ulw /team /hyperplan, interview-driven planning, and an adversarial review gate. The always-on core needs no external service; graph, orchestration and dashboard are separate profiles that are off by default. Registers one UserPromptSubmit hook whose injection is gated off by default (omz.keyword_hook) — see the README before enabling it.",
+      "description_i18n": {
+        "en": "Multi-agent orchestration: 9 subagents, /ulw /team /hyperplan, interview-driven planning, and an adversarial review gate. The always-on core needs no external service; graph, orchestration and dashboard are separate profiles that are off by default. Registers one UserPromptSubmit hook whose injection is gated off by default (omz.keyword_hook) — see the README before enabling it.",
+        "zh-CN": "多代理编排：9 个子代理、/ulw /team /hyperplan、访谈式规划、对抗性评审门。core 常开且不依赖任何外部服务；graph / orchestration / dashboard 是三个默认关闭的独立 profile。会注册一个 UserPromptSubmit hook，其注入由 omz.keyword_hook 默认关闭 —— 启用前请先读 README。"
+      },
+      "author": {
+        "name": "OMZ",
+        "url": "https://github.com/djt889/OhMyZcode"
+      },
+      "homepage": "https://github.com/djt889/OhMyZcode",
+      "category": "productivity",
+      "tags": ["orchestration", "subagents", "multi-agent", "planning", "code-review"],
+      "examplePrompts": [
+        "/ulw add pagination to the /users endpoint, with tests",
+        "/hyperplan migrate this service off the legacy config loader",
+        "/team refactor the auth module across the three packages",
+        "/omz-doctor"
+      ],
+      "examplePrompts_i18n": {
+        "zh-CN": [
+          "/ulw 给 /users 接口加分页，带测试",
+          "/hyperplan 把这个服务从旧配置加载器迁出去",
+          "/team 跨三个包重构 auth 模块",
+          "/omz-doctor"
+        ]
+      },
+      "source": {
+        "source": "github",
+        "repo": "djt889/OhMyZcode",
+        "ref": "v1.7.0"
+      }
+    }
+  ]
+}

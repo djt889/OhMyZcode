@@ -21,8 +21,11 @@
 
 - **启用**：项目 `.zcode/config.json` 写 `{ "omz": { "keyword_hook": true } }`（或 `.omz/config.json` 的
   `{ "keyword_hook": true }`），重启会话。**不需要动 `hooks.json`**。
-- **运行层彻底关掉**：在 hooks 数组**元素**里加 `"enabled": false`，或从 `.zcode-plugin/plugin.json` 移除
-  `hooks` 声明。只把顶层 `enabled` 置回 `false` 不起作用。
+- **运行层彻底关掉**：在 hooks 数组**元素**里加 `"enabled": false`，或删掉 `hooks/hooks.json`。只把顶层
+  `enabled` 置回 `false` 不起作用。注意「从 `.zcode-plugin/plugin.json` 移除 `hooks` 声明」**不是**关闭手段：
+  1.7.0 起清单本来就不声明 hooks——引擎会自动发现 `<root>/hooks/hooks.json` 这个确切路径
+  （`listPluginHookSources`），同一 realpath 再声明一遍只会得到一条 `Duplicate plugin hooks file ignored`
+  warning，而自动发现那条照样运行。
 
 ## 启用后的固定成本：每条消息一次 node 进程
 
