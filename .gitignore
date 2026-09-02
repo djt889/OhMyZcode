@@ -23,6 +23,12 @@ tmp/
 # 冒烟与一次性验证产物
 .smoke-*
 
+# CodeGraph 索引（graph profile）。codegraph 自己会在 .codegraph/ 里放一份
+# `*` + `!.gitignore` 的忽略规则，所以 codegraph.db 本来就不会进仓库；
+# 这一条是让整个目录不出现在 git status 里 —— 它是 per-machine 的本地索引，
+# 内含项目绝对路径与符号表，且体量随代码库增长（本仓库 31 文件 ≈ 3.8MB）。
+.codegraph/
+
 # 覆盖率报告
 coverage/
 
