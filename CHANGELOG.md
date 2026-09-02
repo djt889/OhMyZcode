@@ -1,276 +1,812 @@
-# OMZ 实现变更日志
+**English** | [简体中文](./CHANGELOG.zh-CN.md)
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.5.0** ↔ DESIGN **v1.5**。
+# OMZ implementation changelog
 
-**跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
+**Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
+progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.5.0** ↔
+DESIGN **v1.5**.
 
-每个条目记录三件事：**范围**（交付了什么）、**验证**（怎么证明它工作，用可复现的数字）、**已知缺口**（当时还没有的）。数字均取自 2026-09-01 在 Node v22.14.0 / Windows 上的实际运行输出。
+**Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
+requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
+writing back measurements from a real environment (the five current items of §10.2: **V3** the actual injection
+behavior of the hook's `additionalContext`, **V4** the resume adapter, **V8′** the timing of the permission prompt on
+parallel spawns, **V10** CodeGraph installation, **V11** real-machine rendering of the Electron dashboard and actual
+CSP blocking). Both kinds depend on a real installed environment or a real ZCode session and were not delivered this
+round; 1.0.0 was never released on its own — once the orchestration layer landed, it went straight into the 1.x line.
+The list itself shrinks as versions go by: the enumeration part of **V8** and the **V9** concurrency stress test were
+settled in 1.4.0 (V8 has only the prompt sub-item left, recorded as V8′), and the 9 agent spawn pings of **V12** were
+settled by the 1.5.0 installed-environment acceptance (six items → five).
 
----
-
-## 1.5.0 — 装机验收：真实会话跑通 doctor 与 `/ulw` 全生命周期（2026-09-01）
-
-1.4.0 之前的每条结论都建立在"代码 + 测试 + 引擎反查"的推断上，真实环境一次没跑。这一版把 OMZ 装进 ZCode、重启会话、在真实会话里跑完 `/omz-doctor`、`/omz-status` 与一条完整的 `/ulw` 生命周期，并把实测结果回写设计文档。没有新功能——交付物是**证据**，以及被证据结清或推翻的条目。
-
-**范围**
-
-- **V12 结清**：`/omz-doctor` 在真实会话内逐个 spawn 9 个 agent，**9/9 全部返回 `OMZ-PONG`**，无一 not found；裸名（`omz-planner` 等）与 `omz:` 命名空间前缀双入口均可 spawn。这一项是此前六项待实测里**唯一卡住 core 主路径**的，结清后 DESIGN §10.2 由六行减为五行（V12 移入 §10.1 已实测表）。
-- **只读白名单取得行为级确证（B1）**：五个受限角色（critic/oracle/reviewer/librarian/looker）的实测工具面**均无 Edit**，三个全工具角色（deep/junior/atlas）**有 Edit**，逐项与 frontmatter 吻合（planner 恰为 `Bash, Read, Write`，librarian 恰为 `Bash, Read, WebFetch`）。此前只有静态校验 + 引擎解析链推断。同时复验：9 个角色**全部无 `Agent`**（V5）、**全部无 `Grep`/`Glob`**（B20）、**连全工具角色都没有 `WebSearch`**（§17 裁决 2）。
-- **B16 结清**：OMZ 四个 skill 在子代理侧**全部可见且带 `omz:` 前缀**——委派 prompt 不必内联 skill 摘要，原回退方案作废。
-- **四条引擎/运行时新事实**：① 子代理工具面**多出一个 frontmatter 未声明的 `RespondToCoordinator`**（引擎注入，不受白名单约束）——"工具面 = 白名单 ∪ 引擎注入面"，第三层不可控；② **可见 skill 数因角色而异**（junior/atlas **40**、deep/reviewer **34**、其余五个 **33**），分档机制未查清，当前不影响 OMZ 但也不是引擎承诺；③ **worker 侧看得见 MCP 工具组**，调用权只能靠协议纪律约束；④ **B27 的两路渲染净化能力差已量化**：同一个含换行 + 竖线的恶意 title 下，`/omz-status` 内联块渲染出**多一行伪造任务**（**41 行**，`T-999` 独立成行冒充真任务），而 `render-status.mjs` 的 `cell()` 把它压成单元格内一行（**40 行**恒定，竖线换 `¦`）——"以 `render-status.mjs` 为准"是实测的能力差，不是免责声明。
-- **`/ulw` 端到端冒烟通过（M1 验证标准）**：在系统临时目录造真实 Node ESM 靶子项目跑完整生命周期——planner 出计划 → **critic 报 4 个 blocker 打回**（`.omz/evidence/` 不存在而 `tee` 不建父目录致转录静默落空／波内两任务并行写同一测试文件互相覆盖／判据与自身任务粒度不自洽／`# fail 0` 判据在 TTY 默认 spec reporter 下整体落空）→ rev2 → **两轮 junior 执行，failing-first 真的红了** → **reviewer 第一轮判 `needs-fix`** → 修完复审判 **`confirmed`**。全程在临时目录，插件仓库零污染。
-- **DESIGN.md v1.4 → v1.5**，新增 **§18「装机后冒烟验收链路」**（可复现记录：靶子构造、两轮评审的逐条发现、内存重放取证法、双证据判据升级为"命令串本身逐字可执行"），并把上述结论回写 §8/§9/§10/§13/§14/§17。
-- **移除 dashboard preload（发布前收尾）**：删除 `dashboard/preload.mjs`，连同 `main.mjs` 的 `windowOptions()` 里的 `preload` 字段与配套的 `OMZ_DASHBOARD_URL`/`OMZ_DASHBOARD_TOKEN` 环境变量写入。三条理由：① 与 `sandbox: true` **互相排斥**——Electron 官方文档明确 "Sandboxed preload scripts can't use ESM imports"，sandboxed preload 以普通脚本（非 ESM 上下文）加载，而原文件是 `.mjs`；它靠 `typeof require` 守卫躲开抛错，代价是 **sandbox 下 `contextBridge` 是否可达没有任何文档承诺**，"这道防护是否生效"无从验证；② **零引用的死代码**——`renderer/app.js` 与 `index.html` 对 `omzDashboard`/`getBootInfo` 一处都没有引用；③ **删掉不减少保护面**——renderer 的页面与数据全部来自 loopback HTTP 服务（`fetch('/api/*')`），token 走地址栏 query（`urlOf('/')` 拼 `?token=`，页面从 `location.search` 读），主进程手上没有 renderer 拿不到的东西。**因此 §13.5 I5 的安全清单从七道防护改为六道**（1.1.0 那条"preload 最小面"是第七道）：这是**一条无法验证的承诺被撤下**，**不是一道防护失效**——攻击面前后相同，`contextIsolation`/`nodeIntegration:false`/`sandbox`/`webSecurity` 四项 BrowserWindow 硬化全部保留。将来若真需要主进程数据，只能用 `preload.cjs`（sandbox 下按 CJS 加载）并把暴露面重新登记进 I5 清单；理由与落点见 `dashboard/README.md`「为什么 Electron 壳不需要 preload」。
-- **`engines.node` 由 `>=22.5.0` 提到 `>=22.13.0`**（源码级取证）：Node 22.5–22.12 的 `node:sqlite` 在 `--experimental-sqlite` flag 之后（未开 flag 即不注册该内置模块），直接 import 抛 `ERR_UNKNOWN_BUILTIN_MODULE`，**coordinator 与 dashboard 启动即崩栈**，用户会得到"只有 core 能用"的半残装机；官方 `doc/api/sqlite.md` 的 history 表写明 "v22.13.0 — SQLite is no longer behind `--experimental-sqlite`"。同步改动：`adapters/zcode/capability.mjs` 的 `MIN_MINOR` 5 → 13、`package.json` 的 `engines.node`、`README.md` 与 `mcp/coordinator/README.md` 的下限说明、`tools/doctor.mjs` 的 `cap:node`/`supply:engines` 文案与修复建议（`fix` 里写明 22.5–22.12 需 flag 的原因）。`tests/capability.test.mjs` 的下限用例改为**从 `package.json` 的 `engines.node` 读取版本号写进用例名与失败消息**（`MIN_MAJOR`/`MIN_MINOR` 是 capability.mjs 的私有常量、未 export，engines 是测试能拿到的唯一权威声明），此后改门槛不会再留下写死旧版本号的文案。**判定逻辑未变**：doctor 与测试都走 `capability.mjs` 的常量，本条只是把文案与常量对齐。
-
-**验证**
-
-`npm test` **548 tests / 99 suites 全绿**（与 1.4.0 同数——本版不加测试，交付物是真实环境证据）；`node tools/doctor.mjs` **无 FAIL**（唯一 WARN 是本机未装 codegraph，`graph` profile 默认关闭属预期）；`node tools/validate-frontmatter.mjs .` 通过；`node hooks/keyword-detect.mjs --self-test` **27/27**。真实会话侧：`/omz-doctor` 的 9 次 spawn ping 全部返回暗语并带回自报工具面与自报可见 skill 清单；`/ulw` 终态靶子项目 `npm test` **8/8/0**、四条 SC 全 done、boulder `status: done`、`.omz/` 卫生扫描零 BOM 零反斜杠零损坏。
-
-**已知缺口**
-
-剩 **5 项**真实环境验收未做（1.4.0 是六项，减掉的正是 V12）：**V3**（hook `additionalContext` 的实际注入行为——本次两个命令都走斜杠路径，不触发 hook）、**V4**（resume 适配器——冒烟全程任务级新 spawn，未触达 resume 路径）、**V8′**（并行 spawn 的权限弹窗时序——本次 spawn 均为顺序发起，没制造并行场景）、**V10**（CodeGraph 装机）、**V11**（Electron dashboard 真机渲染与 CSP 实际拦截）。五项全在触发增强层、可选适配层或可选 profile，回退形态都已是当前的常态发行配置，**没有一项会让 core 不可用**。另一条诚实边界：core 主路径只跑过**一个小特性、一条路径**——B18 的中断续跑、`/team` 的 claim 过门、LIGHT/HEAVY 分级、EXPAND 尾巴、5-lane 评审这些分支本次都没走到。
+Every entry records three things: **Scope** (what was delivered), **Verification** (how it was proven to work, with
+reproducible numbers), and **Known gaps** (what was still missing at the time). All numbers are taken from actual run
+output on Node v22.14.0 / Windows on 2026-09-01.
 
 ---
 
-## 1.4.0 — 设计文档回写与收尾对齐（2026-09-01）
+## 1.5.0 — Installed-environment acceptance: doctor and the full `/ulw` lifecycle run through in a real session (2026-09-01)
 
-1.3.0 修完了代码，这一版做三件事：把**实现期学到的东西写回设计文档**、清掉规格与实现的残余分歧、以及**用变异测试验证测试本身是否真的会红**。没有新功能。
+Every conclusion before 1.4.0 rested on inference from "code + tests + engine reverse-lookup"; the real environment
+had never been run even once. This version installed OMZ into ZCode, restarted the session, ran `/omz-doctor`,
+`/omz-status` and one complete `/ulw` lifecycle through inside a real session, and wrote the measured results back
+into the design document. There are no new features — the deliverable is **evidence**, plus the items that the
+evidence settled or refuted.
 
-**范围**
+**Scope**
 
-- **DESIGN.md v1.3 → v1.4**（1117 → 1482 行）。新增 §17「实现期架构裁决」12 条，每条按「设计期表述 → 事实 → 裁决 → 影响面」记录；新增 B22–B30 九条 bug 预案（全部来自实际命中的缺陷，不是推演）与 I7–I10 四条集成风险；§10.3 补第二、三轮引擎符号级反查的十条代码级证据；§10.2 待实测项重排（V8 枚举与 V9 并发压测已结清移入 §10.1，剩 V3/V4/V8′/V10/V11/V12 六项）；§9 里程碑表加「v1.4 实际状态」列；§8.2 重写 hook 触发层的事实。
-- **反假测试（本轮最有价值的部分）**。独立验收审计做了变异测试——把整仓复制到临时目录、随机破坏被测实现、看对应测试是否变红。结果发现三条**不可失败的测试**：I10 的 dashboard 鉴权分层（把 `/api/snapshot` 加进 `PUBLIC_PATHS`、或把静态壳移回 token 门之后使面板彻底不可用，46/46 全过）、B27 的看板字段注入净化（让 `cell()` 直接返回原值，139 个用例全过）、B28 的波次数值排序（改回字典序无人发现）。修法：`dashboard/server.mjs` 让请求流水线**直接用** `PUBLIC_PATHS.has(pathname)` 判定（消除第二份独立判断，改常量即改行为），测试加同源断言 + token 非空服务上的真实浏览器序列；新建 `tests/render-status.test.mjs` 直测 `cell()` 与 `compareWave()` 并做端到端伪造攻击断言。抽查又发现三条同类假测试（`MAX_SSE_STREAMS`、`parseEventCursor`、流水线的 loopback 门）一并补齐。四次变异逐个复验会红。
-- **引擎第三轮反查推翻两个前提**。① `hooks.json` 的 `matcher` 在 `UserPromptSubmit` 上**不参与筛选**：`hookRunner.run(t, r={})` 用第二参数做匹配，而 `runUserPromptSubmitHooks` 只传 `{signal}`，匹配函数在 matchValues 为空时无条件返回 true——所以"不命中连 node 进程都不启（省开销）"是错的，启用 `keyword_hook` 后每条用户消息都付约 126–132ms（裸 `node -e 0` 基线 85–91ms）。② `permissionMode` 枚举已直接取出（`acceptEdits`/`auto`/`bypassPermissions`/`default`/`dontAsk`/`plan`），**没有任何值能移除单个工具**——所以「用 `permissionMode` 把 Bash 收成结构约束」这条收紧路径不可行，双层模型（Edit/Write 结构 + Bash 纪律）是**终态**而非过渡态。
-- **新增 B30【高】：主 agent 拿不到 sessionId**。`${ZCODE_SESSION_ID}` 只在 hook / MCP / 命令的 shell 执行块上下文展开，Bash 工具的 env 里没有它，系统提示词 `<env>` 块也只有 cwd/git/platform/shell/osVersion——而协议要求把目标写到 `.omz/goal/<sessionId>.json`。模型会自己编一个，本轮自洽、看板照渲、doctor 检不出，**又一个退出码 0 的假成功**（B22 家族）。修法：`commands/ulw.md` 新增「第零步：会话标识」用内联执行块取真实值（并挡住"引擎未展开时字面量 `${...}` 残留"这一分支），取不到则用 `<ISO 时间戳>-<git HEAD 短哈希>` 确定性回退，**明令禁止编造**，并把 `boulder.json` 的 `active_goal` 钉为跨会话找回的唯一权威指针（`session_ids` 只作审计线索）。
-- **MCP 工具真名**。插件 MCP 工具的实际名字是 `mcp__plugin_omz_omz-coordinator__omz_team_create` 形态，而 `commands/team.md` 与 DESIGN §7.2 全用裸名——主 agent 按字面调用会 tool-not-found（有回退，但表现为"orchestration 开了却总在降级档"，极难诊断）。修法：命令新增第零步，要求按后缀匹配自己的工具清单现取真名（不硬编码长名，插件名或 server key 变了也不会错），找不到即判定 profile 未启用并走 core 回退。
-- **`hooks.json` 清掉死字段**。顶层 `enabled` 与 `maxOutputBytes` 经取证引擎**从不读取**（`parsePluginHookEvents` 只取 `rawHooks.hooks`，有插件 hook 时引擎强制 `enabled: true`）；真正生效的是 hooks 数组**元素级**的 `enabled`。删掉两个死字段并把取舍写进 `_comment`（已验证引擎忽略未知顶层键）。有意**不写**元素级 `enabled: false`——那会让语义闸 `keyword_hook` 永远不被触及，用户想启用得改插件文件而非项目配置。
-- **收尾对齐**：`omz-looker` 的 tools `[Read]` → `[Read, Bash]`、maxTurns 10 → 15（纯 `[Read]` 拿不到待检图片路径，该角色此前实际不可用）；附录 A 的"全工具"写法由 `tools: []  # 全工具` 改为**明确要求省略该行**（`tools: []` 是空白名单，与"省略=继承全工具"语义相反，与 B23 同源）；`coordinator.sqlite` 定为**单库多 team**（v1.3 目录树的分库画法被推翻，隔离改由 per-team 文件区 + 库内 `team_id` 外键承担）；附录 A 九个骨架与 `agents/*.md` 实际文件逐字段对齐（diff 归零）；doctor 汇总行改为 `9/9 静态校验OK（spawn ping 未执行）`（旧措辞会让人误读为 V12 已完成）；三个模块 README 的 `${pluginDir}`、过期字节数、开关表述一并修正。
-- **§14 置信度重新标定**：分母从"设计能否实施"换成"代码能否在真实环境按预期跑"，整体 98%（设计交付）→ **95%（代码交付）**。只读子项 70%（裁决 3 的终态结论）、集成选型层 90%（CodeGraph 未装机）、新增展示层 85%；并发子项因 V9 压测通过而上调。
+- **V12 settled**: inside a real session `/omz-doctor` spawned the 9 agents one by one, and **all 9/9 returned
+  `OMZ-PONG`**, not one of them not found; both entries work for spawning — the bare name (`omz-planner` etc.) and
+  the `omz:` namespace prefix. Of the six previously pending empirical items this was **the only one blocking the
+  core main path**; once settled, DESIGN §10.2 shrank from six lines to five (V12 moved into the §10.1 table of
+  measured items).
+- **The read-only whitelist gained behavior-level confirmation (B1)**: the measured tool surfaces of the five
+  restricted roles (critic/oracle/reviewer/librarian/looker) **all lack Edit**, the three full-tool roles
+  (deep/junior/atlas) **have Edit**, and each matches the frontmatter item by item (planner is exactly
+  `Bash, Read, Write`, librarian exactly `Bash, Read, WebFetch`). Previously there was only static validation plus
+  inference from the engine's parsing chain. Re-verified at the same time: all 9 roles **have no `Agent`** (V5),
+  **none has `Grep`/`Glob`** (B20), and **not even the full-tool roles have `WebSearch`** (§17 ruling 2).
+- **B16 settled**: all four OMZ skills are **visible on the subagent side and carry the `omz:` prefix** — a
+  delegation prompt does not need to inline skill summaries, and the original fallback plan is void.
+- **Four new engine/runtime facts**: ① the subagent tool surface **has one extra `RespondToCoordinator` that the
+  frontmatter never declared** (injected by the engine, not subject to the whitelist) — "the tool surface = the
+  whitelist ∪ the engine's injected surface", and the third layer is beyond our control; ② **the number of visible
+  skills varies by role** (junior/atlas **40**, deep/reviewer **34**, the other five **33**); the tiering mechanism
+  has not been pinned down, it currently does not affect OMZ, but it is not an engine promise either; ③ **the worker
+  side can see the MCP tool group**, and the right to call it can only be constrained by protocol discipline; ④ **the
+  sanitization capability gap between B27's two rendering paths has been quantified**: given the same malicious title
+  containing a newline plus a vertical bar, the inline block of `/omz-status` renders **one extra line of forged
+  task** (**41 lines**, with `T-999` on its own line impersonating a real task), whereas `cell()` in
+  `render-status.mjs` flattens it into one line inside a cell (a constant **40 lines**, with the vertical bar replaced
+  by `¦`) — "`render-status.mjs` is authoritative" is a measured capability gap, not a disclaimer.
+- **The `/ulw` end-to-end smoke test passed (the M1 verification criterion)**: a real Node ESM target project was
+  built in the system temp directory and the full lifecycle was run — planner produced a plan → **critic reported 4
+  blockers and sent it back** (`.omz/evidence/` did not exist and `tee` does not create parent directories, so the
+  transcript silently went nowhere / two tasks in the same wave wrote the same test file in parallel and overwrote
+  each other / the criteria were not self-consistent with the granularity of its own tasks / the `# fail 0` criterion
+  falls through entirely under the default spec reporter on a TTY) → rev2 → **two rounds of junior execution, and
+  failing-first really did go red** → **reviewer returned `needs-fix` in the first round** → after the fixes, the
+  re-review returned **`confirmed`**. All of it in a temp directory, with zero pollution of the plugin repository.
+- **DESIGN.md v1.4 → v1.5**, adding **§18 "The post-installation smoke acceptance chain"** (a reproducible record:
+  building the target, the item-by-item findings of the two review rounds, the memory-replay evidence method, and the
+  upgrade of the dual-evidence criterion to "the command string itself is executable verbatim"), and writing the
+  conclusions above back into §8/§9/§10/§13/§14/§17.
+- **Removed the dashboard preload (pre-release wrap-up)**: deleted `dashboard/preload.mjs`, along with the `preload`
+  field in `windowOptions()` in `main.mjs` and the accompanying writes of the `OMZ_DASHBOARD_URL`/`OMZ_DASHBOARD_TOKEN`
+  environment variables. Three reasons: ① it is **mutually exclusive** with `sandbox: true` — Electron's official
+  documentation states explicitly that "Sandboxed preload scripts can't use ESM imports", a sandboxed preload is
+  loaded as an ordinary script (a non-ESM context), and the original file was `.mjs`; it dodged the throw with a
+  `typeof require` guard, at the cost that **there is no documented promise whatsoever about whether `contextBridge`
+  is reachable under sandbox**, so "whether this protection is in effect" cannot be verified; ② it is **dead code with
+  zero references** — neither `renderer/app.js` nor `index.html` references `omzDashboard`/`getBootInfo` even once;
+  ③ **deleting it does not reduce the protected surface** — the renderer's page and data all come from the loopback
+  HTTP service (`fetch('/api/*')`), the token travels in the address-bar query (`urlOf('/')` appends `?token=` and the
+  page reads it from `location.search`), and the main process holds nothing the renderer cannot get. **The I5 security
+  list in §13.5 therefore goes from seven protections to six** (the "minimal preload surface" from 1.1.0 was the
+  seventh): this is **an unverifiable promise being withdrawn**, **not a protection failing** — the attack surface is
+  the same before and after, and all four BrowserWindow hardening items,
+  `contextIsolation`/`nodeIntegration:false`/`sandbox`/`webSecurity`, are retained. If data from the main process is
+  ever genuinely needed in the future, the only way is `preload.cjs` (loaded as CJS under sandbox) with its exposed
+  surface re-registered on the I5 list; for the reasoning and where it lands see "Why the Electron shell does not need
+  a preload" in `dashboard/README.md`.
+- **`engines.node` raised from `>=22.5.0` to `>=22.13.0`** (source-level evidence): on Node 22.5–22.12 `node:sqlite`
+  sits behind the `--experimental-sqlite` flag (without the flag that builtin module is not registered), so importing
+  it directly throws `ERR_UNKNOWN_BUILTIN_MODULE` and **the coordinator and the dashboard crash on startup**, leaving
+  the user with a half-crippled installation where "only core works"; the history table in the official
+  `doc/api/sqlite.md` states "v22.13.0 — SQLite is no longer behind `--experimental-sqlite`". Accompanying changes:
+  `MIN_MINOR` in `adapters/zcode/capability.mjs` 5 → 13, `engines.node` in `package.json`, the lower-bound wording in
+  `README.md` and `mcp/coordinator/README.md`, and the `cap:node`/`supply:engines` wording and fix suggestions in
+  `tools/doctor.mjs` (the `fix` spells out why 22.5–22.12 need the flag). The lower-bound test case in
+  `tests/capability.test.mjs` was changed to **read the version from `engines.node` in `package.json` and put it into
+  the case name and the failure message** (`MIN_MAJOR`/`MIN_MINOR` are private constants of capability.mjs and are not
+  exported; engines is the only authoritative declaration a test can reach), so changing the threshold from now on
+  will no longer leave hard-coded old version numbers in the wording. **The decision logic is unchanged**: both doctor
+  and the tests go through the constants in `capability.mjs`; this entry only aligns the wording with the constants.
+- **Three wrap-up items added after this entry was released** (recorded in this round, so "this version adds no tests"
+  above no longer holds):
+  1. **9 tests added for the absolute-form whitelist of `checkRequestTarget` → 557 tests / 101 suites at that point**
+     (this entry's final total is the 572/102 of the injection-budget item below and of the "Verification" block).
+     That gate was
+     previously **the only item on the I5 list with an implementation and zero assertions** (searching the whole
+     repository hit only `server.mjs` itself, and replacing the function body with `return true` would not have turned a
+     single case red). What was added is assertions at two levels: 5 pure-function cases (origin-form always allowed,
+     absolute-form matching the local whitelist allowed, an external host and a mismatched port refused, authority-form
+     and asterisk-form refused, every non-http scheme refused) + 4 real-socket cases (writing the request line by hand
+     with `net.connect`, because the `node:http` client only sends origin-form and cannot construct an absolute-form;
+     covering external host→400, local host→200, origin-form→200, ftp scheme→400), asserting also that the 400 happens
+     before any static file is read (the response body contains none of `app.js`).
+  2. **The license criterion extracted into the shared function `tools/lib/license-gate.mjs`**. Previously
+     `tools/doctor.mjs` and `tools/sync-omo-skills.mjs` each wrote their own criterion, two orders of magnitude apart in
+     strictness: doctor looked at four things (status/spdx/verified_at/verified_via) while sync only required `status` to
+     exist and not begin with `unverified` — so `status: "pending"`/`"TODO"`/even `"x"` passed sync silently, and spdx and
+     the evidence trail were not examined at all. Both sides now share `evaluateLicenseEntry()`, so **the judgement is
+     from one source while the severity differentiates by the caller's responsibility** (doctor's
+     `supply:upstream-license` is a release gate: everything other than `ok` is a FAIL; sync's `loadLock()` is a
+     pre-sync notice: `incomplete`/`unverified` are only WARN with exit code still 0, and `missing` — the record absent
+     entirely — keeps its original ERROR/exit 1, because a missing lock structure is not the same thing as "the
+     verification is unfinished"). To preserve that exit-code contract precisely, the function returns `statusPresent`
+     alongside `level`. The split of "who needs an evidence trail" also belongs to the criterion itself
+     (`PROOF_EXEMPT_KEYS`, fail-closed: proof is required by default and only an explicitly exempted key is excused —
+     `codegraph` is an external MCP dependency rather than a porting source, and its supply-chain evidence is carried by
+     `supply:codegraph` and the NOTICE). **The known boundary is stated as before**: all four items present only proves
+     "there is a re-checkable evidence trail", not that the values themselves are correct; correctness of the values can
+     only be judged by comparing against the upstream LICENSE online, and both doctor and sync are offline checks.
+  3. **The I5 guard count is unified**. `dashboard/server.mjs` and `tests/dashboard.test.mjs` keep the **seven**-way
+     split that follows the code structure (the port and the token are two independent pieces of logic in the
+     implementation), and explicitly note that the difference from DESIGN §13.5 I5's **six**-way split is "different
+     partitions of the same set of guards, not drift", and that the original seventh guard, preload, disappearing with
+     its component is "a promise being withdrawn" rather than "a guard failing".
+- **Documentation bilingualization (this round)**: `DESIGN.md` becomes the English primary file and the new
+  `DESIGN.zh-CN.md` is the Chinese counterpart (the Chinese body is preserved verbatim, not back-translated); both
+  versions carry a language switcher on the first line, and cross-file links point at the matching language version.
+  Three stale numbers were fixed at the same time: the `ulw.md` byte counts in `hooks/README.md` were re-measured as
+  **11175** (**11018** for the body after stripping the frontmatter, `additionalContext` **11105**, the JSON payload
+  **11372**; the old values 7200/7044/7130/7355 predate `ulw.md` being split into eight steps with step zero added);
+  the "injection length cap" section of `hooks/README.md` no longer describes in the present tense a top-level
+  `maxOutputBytes` that **was deleted in v1.4**, and now states accurately that the real cap comes from the
+  user/internal configuration with a **default of 32768**, so that `MAX_CONTEXT_BYTES = 48KB` (49152) **was not an
+  effective line of defence under the default configuration** (a body between 32768 and 49152 passes our own check and
+  is then **discarded in its entirety by the engine, silently** — not "truncated into half a JSON document" as this
+  entry originally said; the forensics and the fix are in the item below), harmless at that moment only because 11105
+  is far below 32768. **This round fixes it, so it is no longer a residual risk to label**; and
+  `548 tests / 99 suites` was changed to the then-current **557/101** everywhere it describes the current state in
+  `DESIGN.md` (this round takes those places to **572/102**; **the 548/99 in the v1.4 version-history entry was the
+  true value at the time and is left alone**).
+- **The hook injection budget was guarding the wrong wall (a real defect, fixed)**. The old `MAX_CONTEXT_BYTES = 48KB`
+  (49152) sat **above** the engine's default `maxOutputBytes` of **32768**, and what it measured was the byte length of
+  the `additionalContext` **string** while the engine measures **the complete JSON payload on stdout** (measured gap:
+  267 bytes for `ulw.md`, and the more Chinese text the larger the gap) — the line of defence was misplaced twice over.
+  An injected body landing between 32768 and 49152 passed our own check and was then **discarded silently by the
+  engine**: `OutputCollector.append()` drops the remaining chunks once `inlineBytes >= maxInlineBytes` (it only sets a
+  `truncated` flag that the hook path never reads), and `parseHookStdout()` then runs `try{JSON.parse(r)}catch{return}`
+  on half a JSON document → `undefined`. No kill, no non-zero exit code, no error at all; the only symptom is "the hook
+  seems to have had no effect". **The fix**: a new `ENGINE_DEFAULT_MAX_OUTPUT_BYTES = 32768` (five identical engine
+  defaults, cited in the comment); the decision now runs on `payloadBytes(text) =
+  Buffer.byteLength(JSON.stringify({additionalContext}), 'utf8')`; the budget is `MAX_PAYLOAD_BYTES = 24576`
+  (32768 − 8192, a 25% margin, because a user or workspace config may lower `maxOutputBytes` and the hook process
+  cannot read that value); degradation goes from two levels to **three** (`full` → `headings` → `minimal`) with
+  `fitToPayload()` as a hard-trim backstop; and the head-window size comes from a **binary search on the measured
+  payload** rather than a linear back-off (which cuts the head window to 0 in one step on escape-dense input).
+  `MAX_CONTEXT_BYTES` is kept but **demoted to a derived reference value** (`MAX_PAYLOAD_BYTES - 24` = 24552) that
+  **takes part in no decision**. **Tests**: `tests/hooks.test.mjs` +15 cases (68 → **83**, the new suite
+  「注入负载预算与降级」), the self-test +3 cases covering full/headings/minimal (27/27 → **30/30**), for a total of
+  557/101 → **572/102**. They include the invariants (budget + margin ≤ the engine default; the payload of all three
+  modes < the budget), a payload upper-bound assertion for each of the three degradation levels, a `ulw.md` regression
+  sentinel (payload < budget with more than 1.5x headroom, so further growth hits the test before it hits the engine),
+  and a degradation-latency sentinel on 5MB input (< 1500ms). **Mutation verification**: putting the budget back to
+  49152 turns 3 cases red (including `预算(49152) + 余量(8192) 必须 <= 引擎缺省(32768)`); deleting the second
+  degradation level turns 3 cases red (including `预算 24 下返回的负载 82865（level=headings）越界`). **Fixed in
+  passing**: the `ulw.md` body after stripping the frontmatter is **11018**, not 11019 (`stripFrontmatter` runs one more
+  `replace(/^\s+/,'')` after removing the delimiter, which eats one leading newline).
 
-**验证**
+**Verification**
 
-`npm test` **548 tests / 99 suites** 全绿（1.3.0 是 515/90，本轮反假测试 +33）；`node tools/doctor.mjs` 无 FAIL（唯一 WARN 是本机未装 codegraph）；`node tools/validate-frontmatter.mjs .` 通过；`node hooks/keyword-detect.mjs --self-test` 27/27。**四次变异验证**：`/api/snapshot` 进 `PUBLIC_PATHS` → 10 条红；静态壳移到 token 门后 → 3 条红（含"面板会无样式无脚本"的明文断言）；`cell()` 返回原值 → 10 条红（含"列数被注入撑开 7 !== 4"）；`compareWave` 改字典序 → 4 条红。**V9 并发压测**（本轮补做）：8 个独立 node 进程抢同一 graph 的 200 个任务 → 730ms 内 200 次 claim、unique=200、**重复 claim 0**、`SQLITE_BUSY` 重试 0 次、`verifyGraphInvariants` 0 violations；`max_parallel=8` 的 40 任务图，超限的 52 次全部返回 `reason:'max-parallel'`。DESIGN.md 交叉引用自查：340 处 `§` 引用去重 41 个全部命中、B1–B30 连续无缺号、I1–I10 连续、V 编号 13 个引用无定义 0。
+`npm test` **572 tests / 102 suites all green** (1.4.0 was 548/99; the `checkRequestTarget` cases added after this
+entry was released are +9, and the injection-budget cases of this round are +15); `node tools/doctor.mjs` **no FAIL**
+(the only WARN is that codegraph is not installed on
+this machine, and the `graph` profile being off by default is expected); `node tools/validate-frontmatter.mjs .`
+passes; `node hooks/keyword-detect.mjs --self-test` **30/30**. On the real session side: all 9 spawn pings of
+`/omz-doctor` returned the passphrase and brought back their self-reported tool surface and self-reported list of
+visible skills; for `/ulw`, the target project in its final state had `npm test` **8/8/0**, all four SCs done, boulder
+`status: done`, and the `.omz/` hygiene scan showed zero BOM, zero backslashes, zero corruption.
 
-**已知缺口**
+**Known gaps**
 
-六项真实环境验收仍未做，全部需要真机或真实 ZCode 会话：V3（hook 的 `additionalContext` 注入行为）、V4（resume 适配器）、V8′（并行 spawn 时的权限弹窗行为）、V10（CodeGraph 装机）、V11（Electron dashboard 真机渲染与 CSP 实际拦截）、V12（会话内 9 个 agent 的 spawn ping）。每项都有明确回退路径，没有一项会让 `core` 不可用。另一项已知残余：未启用 `keyword_hook` 时 hook 仍会空跑（约 126–132ms/条消息），彻底消除需在项目/用户配置层禁用插件 hook。
-
----
-
-## 1.3.0 — 对抗式全量审计与修复；实现对齐 DESIGN v1.3（2026-09-01）
-
-两位独立审计员对全仓库做了对抗式审计——一位查**协议保真度**（agents/commands/skills 的正文是否与 ZCode 的真实工具面自洽、与 OmO 原始协议是否等价），一位查**代码安全与并发**（MCP 服务端、dashboard、hook、adapters）。报告的缺陷已全部修复，并为每一类补了回归测试。本条目按缺陷类型分类，每条都写清"此前的实际后果"，因为多数缺陷的危险性不在于它会报错，而在于它**不会**报错。
-
-### 安全类
-
-- **`now` 参数从 13 个公开 MCP 工具的 `inputSchema` 移除。** 此前调度器时钟对调用方开放，任意 worker 可以 `omz_reclaim_expired({ now: <未来时间> })` 把别人正在跑、lease 未过期的任务判成过期抢走（原 owner 被清空、任务回 `ready` 后被另一 agent 认领），同样能绕过 `retry_at` 退避与 `attempts` 重试预算。现在 MCP 层一律传服务端 `nowSec()`；`now` 只保留在 core 函数签名上作测试注入，且仅当 `OMZ_TEST_TIME=1` 时才接受外部值，每次接受都在 stderr 打一行 WARNING。
-- **`teamId` 与 `projectRoot` 的路径穿越。** `adapters/zcode/transport.mjs` 增加 `safeTeamId()`（非 `[A-Za-z0-9_-]` 一律替换为 `_`）与 `assertInsideOmz()` 断言（解析后的目标必须在 `<projectRoot>/.omz` 之下）；`hooks/keyword-detect.mjs` 的 `resolveProjectRoot()` 对非绝对路径一律不采信、退回 `process.cwd()` 并记 stderr。此前 `teamId='../../../evil'` 能把状态文件写到项目外，hook 侧只安全化了 `sessionId` 而漏了 `projectRoot`。
-- **hook 的 ReDoS。** Markdown 链接屏蔽原用正则 `/\[[^\]\r\n]*\]\([^)\r\n]*\)/`，在 `[[[[…](](](…` 这类退化输入上灾难性回溯：128KB 输入实测 **18.4 秒**，远超 `hooks.json` 的 `timeoutMs: 3000`——引擎超时会直接杀进程，"任何情况都输出 `{}`"的 fail-open 契约当场变成 fail-broken。改为 `maskMarkdownLinks()` 单向线性扫描后同类输入 **2ms**，最坏 O(n)。另加两道自保：扫描窗口 `MAX_SCAN = 32KB`（头 24KB + 尾 8KB 两段独立屏蔽，避免头窗未闭合的三反引号跨越拼接点）与自我预算 `SCAN_BUDGET_MS = 1500`（超预算立即放弃分析返回 `budget-exceeded`；宁可漏检一次，用户还能显式打 `/ulw`，也不能被杀掉输出零字节）。注入体另有 `MAX_CONTEXT_BYTES = 48KB` 上限，超限降级为"头部原文 + 章节标题清单"，防止 `maxOutputBytes: 65536` 硬截断切出半截 JSON。
-- **dashboard 鉴权分层。** 静态壳（`/`、`/index.html`、`/app.js`、`/app.css`）免 token，数据端点（`/api/snapshot`、`/api/events`）必须 token。此前静态资源也在 token 门之后，而浏览器只把 `?token=` 带在地址栏那一个请求上——`<link>`/`<script>` 子资源请求不带任何凭据 → 401 → 页面无样式无脚本 → **面板在默认路径下根本不可用**。分层依据是"响应里有没有数据"：静态壳是编译期固定字节，不含任务、路径或 token。免 token 集合导出为 `PUBLIC_PATHS`。
-- **`/healthz` 不再泄露绝对路径。** 只回 `{ ok, source }`；`degraded[]` 的 reason 含 coordinator db 绝对路径，已移到需 token 的 `/api/snapshot`。另加 `HEALTHZ_TTL_MS = 1000` 结果缓存，避免免鉴权端点变成全量快照的 CPU 放大器。
-- **SSE 连接数上限与共享轮询器。** `MAX_SSE_STREAMS = 8`，超限 `503 + Retry-After: 5`（此前 `streams` 是无界 Set，60 条连接会被全部接受）；所有连接共用**一个** `setInterval`（1500ms）采集并广播同一份快照，CPU 成本与连接数解耦（此前 per-connection 一对定时器各自跑全量采集）。最后一个订阅者断开即停定时器，定时器一律 `unref()`。
-- **eventId 局部化。** `Last-Event-ID` / `?since=` 只作**本连接**的计数起点，不再写回服务器全局计数器——此前传 `Number.MAX_SAFE_INTEGER` 会让 `+1` 失去精度，把**所有**客户端的帧 id 钉死在同一个值。入参经 `parseEventCursor()` 校验（非纯数字 / 非安全整数 / `<=0` / `> 2^31-1` 一律忽略并从 0 开始）。
-- **`tools/sync-omo-skills.mjs` 的 shell 元字符白名单。** lock 里的 `url`/`branch`/`path`/`omz_target` 会被拼进打印给人复制执行的 git 命令，此前一个恶意 lock 的 url 就能把 `; rm -rf` 送进用户终端。现在这些字段先过字符白名单，违规进 `errors` 并 `exit 1`，绝不进入打印。
-
-### 数据一致性类
-
-DAG 的核心不变量是「下游 ready ⟺ 所有上游 done」。它一旦被破坏，**数据库自身仍然是自洽的**（`deps_remaining=0` 且 `status=ready`），事后无法从状态反推出错——所以必须在写入侧堵死，并另备检测手段。
-
-- **终态守卫 + 依赖边一次性消费（两层防重，缺一不可）。** `taskComplete`/`taskFail` 在 `idemLookup` 之后立刻检查任务状态：已在终态集合（`done`/`failed`/`dead`）→ 直接返回 `duplicate: true`，**不再触碰下游**。这一层拦的是"不带幂等键"或"带一个全新幂等键"的重复调用——幂等表对这两种情况完全无感，此前重复 complete 会二次递减下游 `deps_remaining`。第二层是 `task_deps.consumed`（migration `002-task-deps-consumed.sql` 新增，默认 0）：递减只处理 `consumed = 0` 的边并在同一事务内置 1，即使第一层被绕过（历史脏数据、手工 SQL）下游也不会重复解锁。002 同时回填历史数据（已 `done` 上游的出边置 `consumed = 1`），既有库回填后即刻自洽。
-- **`taskFail` 的三道守卫。** ① 终态任务不可 fail（否则已 done 的任务被复活成 `ready`、`result_ref` 被清空、可被重新 claim 再次 complete → 下游二次解锁）；② `owner_agent` 不等于调用方即 `NOT_OWNER`，**包括 `owner_agent` 为 null 的情况**——此前"null 就不校验"等于开了一条任意 agent 对他人任务写 `last_error`、改状态的通道；③ 只有 `running` 的任务可以 fail，`blocked` 任务被 fail 会被改成 `ready`，那是直接绕过依赖的通道。
-- **幂等键与 `task_id` 绑定。** 幂等键现在与 `(op, task_id)` 双重绑定；键已用于其他 `op` 或**另一个 task** → `BAD_ARGS`。此前对 `task_id=2` 用 task 1 的键，`idemLookup` 会返回 `{task_id:1, status:'done', unblocked:[2]}` 且标 `duplicate: true`——调用方据此认为 task 2 已完成，拿到的是**另一个任务**的结果。
-- **`max_parallel` 实际生效。** 此前只存储与回显，`max_parallel=2` 的 team 能有 5 个并发 `running`。`taskClaim` 现在在**同一 `BEGIN IMMEDIATE` 事务内**统计该 team 的 running 数，达上限返回 `{ task: null, reason: 'max-parallel', running, max_parallel }`。计数必须在写事务内做——"先读计数再开事务"本身就是竞态，N 个并发 claim 会同时读到未达上限；计数范围是整个 team（跨该 team 的所有图），因为并发预算是团队级资源。调用方按 `reason` 分支：无 reason = 暂时无 ready 任务，`max-parallel` = 稍后重试，`team-shutdown` = 停止轮询。
-- **新增 `verifyGraphInvariants(db, { graph_id })`** 作为 DAG 不变量检测器（core 的导出函数，不是 MCP 工具，只读、可用于 readonly 句柄，供 doctor / 对账脚本调用）。它拿 `tasks.deps_remaining` 与 `task_deps` 里真实的未完成上游数对账，覆盖 4 类违规：`deps-remaining-mismatch`、`dispatched-with-open-upstream`、`blocked-with-no-open-upstream`、`edge-consumed-but-upstream-not-done` / `edge-unconsumed-but-upstream-done`。
-- **`omz_export_mirror` 的标识体系改用数字 task id。** `tasks` 的唯一约束是 `UNIQUE(graph_id, key)`——key 只在**图内**唯一，同一 team 提交两个图复用同名 key 完全合法，此时以 key 为关联键会让镜像串行（第一个图的任务贴上第二个图的 title/depends_on）。镜像行现在给 `id`（数字，全库唯一，关联主键）/ `key`（供人读）/ `graph_id` / `depends_on`（数字 id 数组）/ `depends_on_keys`。这是对 DESIGN §7.3 样例的**刻意偏离**，已在 `mcp/coordinator/README.md` 记录。dashboard 侧 `buildMirrorIndex()` 三档降级：有数字 id 按 id 关联 → 只有字符串 id 且本 team 内 key 无重名按 key 关联 → 存在重名 key 时**只对重名的那些 key** 退化为不关联并写 `degraded[]`。绝不按 key 猜：错误关联比缺字段更有害。
-- **`reclaimExpired` 的 `last_seen` 不倒退**：把原 owner `transport_state` 置 `unknown` 时写的是回收发生的时刻，而非已过去的 `lease_until`。
-
-### 可用性类（最隐蔽的一类：全是退出码 0 的假成功）
-
-- **`isMain` 判定改用 `fileURLToPath`。** 此前用 `new URL(import.meta.url).pathname`，它是 percent-encoded：插件目录含空格或非 ASCII（Windows 极常见，`C:\Program Files\`、`C:\Users\张三\`）时与 `process.argv[1]` 永不相等，`isMain` 恒为 false ——hook 输出 0 字节、`doctor`/`status`/`sync`/`validate` 全部**静默 exit 0 什么都不做**。退出码 0 意味着用户和 CI 都看不出坏了。统一抽出 `tools/lib/is-main.mjs` 的 `isMainModule(import.meta.url)`，5 个 CLI 入口（doctor / render-status / validate-frontmatter / sync-omo-skills / keyword-detect）与 `dashboard/server.mjs`、`dashboard/main.mjs` 全部改用。
-- **`validate-frontmatter.mjs` 支持 dash 数组。** 此前只认 `tools: [Read, Bash]` 行内数组，合法 YAML 的 `tools:\n  - Read` 被静默解析为 `tools` 缺失（= 全工具）——只读角色的白名单静默失效，而 doctor 报 OK。
-- **`KNOWN_TOOLS` 拆为 `SUBAGENT_TOOLS` 与 `ENGINE_ONLY_TOOLS`。** `Agent`/`WebSearch`/`Grep`/`Glob` 在引擎里存在但子代理侧拿不到（DESIGN §10.1 V5、§13 B20 实测），写进 frontmatter 会被静默忽略。现在出现 `ENGINE_ONLY_TOOLS` 成员直接报错并说明原因——静默忽略的能力声明会让"只读角色靠白名单收束"的假设失效。
-- **`deepNormalizePaths` 改为字段白名单驱动。** 归一只对 `PATH_FIELD_NAMES` 登记过的字段生效（数组元素继承父键名判定）。此前全量深度遍历会把非路径字符串一并"归一"，例如 `regex \d+` 被破坏成 `regex /d+`。
-- **`toPosixRelative` 的越界语义。** 跨卷（`C:` vs `E:`）、设备命名空间、结果以 `..` 开头三种情况不再静默返回相对路径（那是一个在任何机器上都不存在的路径），改为按 `onEscape` 抛错或返回显式标记。
-- **`render-status.mjs` 的波次数值排序与 title 清洗。** 波次此前按字典序排成 1→10→2；title 现在剥换行与竖线——此前 title 含换行可以伪造出一整行看起来合法的任务。
-
-### 协议保真度类
-
-- **Atlas 角色重写。** `omz-atlas` 是子代理，**结构性没有 Agent 工具**（DESIGN §10.1 V5 实测），此前正文却要求它"派执行 agent"——一旦被 spawn 必然违规。改为「**波次状态机 + 派单建议生成器 + 汇报器**」：产出可直接粘贴的 8 要素派单建议（TASK / EXPECTED OUTCOME / 基线+failing-first / REQUIRED SKILLS / REQUIRED TOOLS / MUST DO / MUST NOT DO / CONTEXT）+ 建议 `subagent_type` + LIGHT/HEAVY 标注，回请主 agent 执行 spawn。同时明确它**收不到后台通知**（通知只到主 agent），收点判据只有 results 文件是否存在且可解析。
-- **`ulw-plan` 补齐结构约束说明。** Prometheus 同样不能 spawn，此前三处文件命令它派 Explore/critic。
-- **`ulw-execute` 补入 10 条 Hard rules 全文。** 此前只在 `commands/ulw.md` 有一份，子代理拿不到会话历史也拿不到命令展开的内容。两份现在要求逐字一致，文件里留了同步提醒注释。
-- **`ulw-research` 补 PDF + DOCX 交付工具链**（chrome headless 打印 + pandoc，含 Windows 上逐条探测 chrome 可执行文件的失败回退，命中路径记进 observation-manifest）。
-- **`review-work` 补 `references/` 引用段。** `verdict-schema.md` 里的 AdversarialVerify JSON 契约此前因为 SKILL.md 没有引用它而事实上不可达。
-- **只读角色的"结构性保证"表述修正为诚实版。** `tools: [Read, Bash]` 里 Bash 能写文件（重定向、`sed -i`、`node -e`），此前正文宣称"你物理上改不了代码"是错误的自我认知。现在的表述是"工具面拦得住 Edit/Write，拦不住 Bash 写文件，所以这一条靠你自己守"，并逐条列出禁用命令；`omz-reviewer` 的 `git worktree add/lock/unlock/remove` 是唯一显式豁免命令集。
-- **工具面纠正。** `omz-librarian` 删除不可用的 `WebSearch`（现为 `[Read, Bash, WebFetch]`，正文明确"你没有搜索引擎工具，无链接时明确回报需要主 agent 提供入口，不许凭记忆编造"）；`omz-looker` 从只有 `Read` 加到 `[Read, Bash]`（此前无法枚举图片路径）。
-- **`boulder.json` 指针在目标注册时立即写入**（`commands/ulw.md` 第二步），不再等到收尾。此前若会话在第一个波次前中断，跨会话续跑没有任何指针可查（B18）。
-- **`commands/ulw.md` 拆为八步**与 DESIGN §6 对齐（激活 / 目标注册 / 技能盘点 / 确定性保障 / 规划门槛 / 执行 / 双证据验证 / 评审门与提交）。同时加入 Stop hook 的诚实表述：它属**未实装项**（`hooks/hooks.json` 目前只注册 `UserPromptSubmit`），进度落盘靠主 agent 每个波次收点后主动写 `boulder.json`，**不得依赖** hook 在异常终止时保存进度。
-
-**验证**
-
-- `npm test` → **515 用例 / 90 suites 全通过，0 失败**（`node --test tests/`，约 13.6s）。按文件：coordinator 100、path 82、hooks 68、protocol 48、dashboard 46、transport 37、capability 33、server-mcp 31、cli 30、fallback 25、integration 15。（1.4.0 的反假测试补齐后为 548 / 99。）
-- `node tools/doctor.mjs` → 无 FAIL；`① agents 9/9 OK | ② model OK | ③ gitignore OK | ④ mtime OK | ⑤ BOM OK`，唯一 WARN 是 codegraph 不可用（`graph` profile 默认关闭，属预期）。
-- `node tools/validate-frontmatter.mjs .` → 通过（agents/commands/skills）。
-- `node hooks/keyword-detect.mjs --self-test` → **27/27 通过**，含"Markdown 链接退化输入 32K 不超预算（线性扫描）"与"İ 前缀 + `team` 索引对齐"两条针对本轮修复的用例。
-- `node tools/sync-omo-skills.mjs --check` → lock 字段完整、5 个 `omz_target` 全部存在；3 条 WARN（commit 未 pin / synced_at 未记录 / OmO 许可证 `unverified`），均为"尚未执行过一次真实同步"的预期状态。
-- `tests/protocol.test.mjs` 内含跨文件契约断言：AdversarialVerify 四字段与四枚举在 `omz-reviewer.md` 与 `verdict-schema.md` 逐字一致、复审上限 2 次两处一致、状态枚举三方闭环（coordinator 7 态 + 文件视图 `pending`/`corrupt` = `app.js` 的 `STATES` = `app.css` 的 `.pill[data-state]` 选择器）、`skills/*/references/` 无孤儿文档、`plugin.json` 声明路径全部存在、全仓库无 BOM、全 `.json` 可解析。
-
-**已知缺口**
-
-- DESIGN §10.2 的 **V3 / V4 / V8 三项装机实测未完成**（hook `additionalContext` 实际注入行为、resume 适配器行为、`permissionMode` 枚举与并行 spawn 权限弹窗）。三项各有已写明的回退路径。
-- `graph` profile 需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`，本仓库不含其索引；doctor 目前只能报"不可用"。
-- **Stop hook（DESIGN §9 M4）未实装**，异常终止的宪法清单核对仍靠主 agent 自律。
-- `omz-doctor` 的 spawn ping 9/9 必须**在会话内**执行（离线 doctor 只能做文件级核对）；agent 清单是会话启动快照（B19），装完必须重启会话。
-- OmO 上游许可证仍为 `unverified`，`commit` 未 pin——按 `upstream/README.md` 的纪律，核验回填前禁止合并进 `main`。
-- coordinator 的 SQLite 单写者压力（DESIGN §13.5 I4）只有单元级并发测试，无长时压测样本。
-
----
-
-## 1.2.0 — 测试套件建立（2026-09-01）
-
-**范围**
-
-- 11 个测试文件（`tests/*.test.mjs`）覆盖 path / fallback / capability / transport / coordinator / server-mcp / dashboard / hooks / protocol / cli / integration，全部用 Node 内置 `node:test`，零测试框架依赖。
-- `package.json` 补全 `test` 与 10 个 `test:*` 分文件脚本；`tests/index.js` 作为聚合入口。
-- `protocol.test.mjs` 把文档一致性变成断言（agent 数量与命名、只读角色 tools 不含 Edit/Write、全工具角色不声明 tools、maxTurns 必填、frontmatter 无未知字段、8 要素与 10 条 Hard rules 齐全、8 个 category 全在路由表、两路 status 渲染功能等价、状态枚举三方闭环、references 无孤儿、编码卫生、上游 lock 取证）。
-- `cli.test.mjs` 针对每个 CLI 入口断言 `isMainModule` 在含空格/非 ASCII 路径下仍成立——这条测试是 1.3.0 那个"静默 exit 0"缺陷的守门人。
-
-**验证**：`node --test tests/` 与 `npm test` 等价可用；建立时 354 用例全绿（1.3.0 的审计补齐推到 515，1.4.0 的反假测试补齐推到 548）。
-
-**已知缺口**：无端到端装机测试（需真实 ZCode 会话）；覆盖率未统计。
-
----
-
-## 1.1.0 — dashboard：loopback HTTP/SSE 只读展示层（2026-09-01）
-
-**范围**
-
-- `dashboard/server.mjs`（793 行）纯 HTTP + SSE 服务，零第三方依赖；`dashboard/main.mjs` Electron 壳（缺 Electron 自动降级为纯 HTTP）；`dashboard/preload.mjs` 只经 `contextBridge` 暴露 `getBootInfo()`（**1.5.0 已删除该文件，见该条目「移除 dashboard preload」**）。
-- `dashboard/renderer/` 三件套（`index.html` / `app.js` / `app.css`）：零内联脚本样式；服务端字符串只经 `textContent`/`createTextNode`，渲染前剥 ANSI 与控制字符，超 2000 字符截断标注。
-- 数据源双轨：优先只读打开 coordinator SQLite 走 `core.status()` → `source: 'coordinator'`；db 缺失/损坏/查询失败则回退 `tools/render-status.mjs` 的 `.omz/` 文件视图 → `source: 'files'`，原因写 `degraded[]`，**绝不 500**。
-- 只读契约：所有端点都是 GET，其它方法一律 405；没有任何写入/提交/重试/命令执行端点——dashboard 不能扩大主 agent 权限（DESIGN §15.3-4）。
-- 安全模型七道防护（对应 §13.5 I5）：只绑 loopback（来源判定在 token 校验**之前**，非 loopback 直接 403 + `socket.destroy()`）、随机端口（`port = 0`）、每次启动随机 token（`randomBytes(24)` + `timingSafeEqual`）、CORS 白名单（无 `Origin` 放行，其它 403；请求行的 absolute-form host 也校验）、SSE 只发 `snapshot`/`heartbeat` 结构化事件、CSP 禁 inline script、preload 最小面（**最后一道随 preload 删除于 1.5.0 撤下，I5 现为六道，见该条目**）。
-- `transport_state`（agents 表）与 `coordinator_state`（tasks.status）永远分两列，不互推不合并（I3）；文件视图无传输维度时 `transport_state` 恒为 `null`。
-
-**验证**：URL（含 token）只打到 stderr，stdout 保持干净；SIGINT 优雅关闭。`node dashboard/server.mjs --project <dir> --port 0` 可独立启动。
-
-**已知缺口**：当时静态资源也在 token 门之后（浏览器子资源不带 token → 面板默认不可用）、`/healthz` 回 `degraded[]` 含绝对路径、SSE 无连接上限且 per-connection 各跑一份全量采集、eventId 写回全局计数器——四项在 1.3.0 修复。
-
----
-
-## 0.9.0 — mcp/coordinator：SQLite 支撑的 DAG 调度 sidecar（2026-09-01）
-
-**范围**
-
-- `mcp/coordinator/server.mjs`（stdio JSON-RPC）+ `core.mjs`（968 行纯逻辑）+ `db.mjs`（迁移执行器与连接管理）+ `schema.sql` + `migrations/001-init.sql`。零第三方依赖，只用 Node 内置 `node:sqlite`（因此 `engines.node >= 22.5.0`；启动会打 ExperimentalWarning，正常）（**1.5.0 已提到 `>=22.13.0`——22.5–22.12 上该模块在 `--experimental-sqlite` flag 之后，见该条目**）。
-- **13 个 MCP 工具**：`omz_team_create` / `omz_dag_submit` / `omz_task_claim` / `omz_task_heartbeat` / `omz_task_complete` / `omz_task_fail` / `omz_mail_send` / `omz_mail_receive` / `omz_mail_ack` / `omz_status` / `omz_team_shutdown` / `omz_reclaim_expired` / `omz_export_mirror`。
-- 事务边界纪律（DESIGN §7.2 / §13.5 I4）：claim 用 `BEGIN IMMEDIATE` + 单条 `UPDATE ... RETURNING`（`RETURNING` 不是锁，缺 IMMEDIATE 两个 writer 会读到同一 ready 行）；**外部 agent 执行期间绝不持有写事务**，claim 返回即 COMMIT；`core.mjs` 只 import `node:crypto` 与 `./db.mjs`，无 fs/spawn/网络，因此 `SQLITE_BUSY` 时整个事务含回调可安全重放。
-- `PRAGMA journal_mode=WAL; busy_timeout=5000; foreign_keys=ON` + 有界指数退避（基数 25ms、最多 5 次、带 jitter），超限抛 `BUSY_TIMEOUT`；时间戳统一 unix 秒整数，与 `unixepoch()` 同刻度。
-- at-least-once 语义 + 幂等键（`complete`/`fail` 必带，`send` 用 `dedupe_key`，`ack` 天然按 message 幂等），重复调用返回首次结果并标 `duplicate: true`。
-- 环与未知 key 在写库前拒绝；mailbox 的 `seq` 在事务内 `MAX+1` 无空洞；`status()`/`exportMirror()` 的 `counts` 字段集合恒定 7 态（含 `unknown`）不随库中实际状态漂移。
-- 迁移纪律：`migrations/*.sql` 按文件名字典序重放，已发布文件**永不修改**，结构变更只追加；因 SQLite 的 `ALTER TABLE ADD COLUMN` 没有 `IF NOT EXISTS`，执行器支持文件首部指令 `-- @skip-if-column <table>.<column>`。
-- `.zcode-plugin/plugin.json` 加回 `mcpServers.omz-coordinator`（`enabled: false`，`${ZCODE_PLUGIN_ROOT}` 变量，`OMZ_COORDINATOR_DB` 指向 `${ZCODE_PROJECT_DIR}/.omz/runtime/coordinator.sqlite`）——路径此时才真实存在。
-
-**验证**：手工 smoke（`initialize` / `tools/list` / `omz_team_create` 三行喂 stdin）stdout 三行合法 JSON，`tools/list` 返回 13 个工具；stdout 只有 JSON-RPC，日志全走 stderr；工具级失败返回 `isError: true` 的 tool result 而非 JSON-RPC error，未知方法 `-32601`，解析失败 `-32700`。
-
-**已知缺口**：当时 `now` 在 13 个工具的 inputSchema 里对外开放、`max_parallel` 只存不用、幂等键未与 task 绑定、`taskFail` 在 `owner_agent` 为 null 时不校验身份、无终态守卫与边的一次性消费、无 `verifyGraphInvariants`、`exportMirror` 按 key 关联——全部在 1.3.0 修复（`consumed` 列由 `migrations/002-task-deps-consumed.sql` 引入）。
-
----
-
-## 0.6.0 — 上游来源锁定与选择性同步纪律（2026-09-01）
-
-**范围**
-
-- `upstream/omo-sources.lock.json`：上游仓库/分支/pin 的 commit SHA/同步时间/已移植路径 ↔ OMZ 目标文件映射/`ignored_paths`/许可证记录。**只记录来源与移植状态，不存放上游代码**（DESIGN §16.2）。
-- `tools/sync-omo-skills.mjs`：`--check`（lock 字段完整性 + `omz_target` 存在性，ERROR 时 exit 1）/ `--plan`（打印待人工执行的 git 命令清单）/ `--pin <40 位小写 hex SHA>`（回写 `commit` + `synced_at`，输出无 BOM、LF 结尾）。**只打印命令、绝不执行 git**——上游同步必须人工过目。
-- `upstream/README.md` 记录分支纪律（`main` / `upstream-sync` / `porting/<date>`，**禁止 `git merge upstream/dev`**）、5 步同步流程、5 条永不移植的宿主 API 路径（`omo-opencode` / `omo-codex` / `team-core` / `tmux-core` / `model-core`）及其判据、许可证与 NOTICE 要求。
-- `commit` 字段永不写猜测值：未 pin 一律 `null` + `commit_status` 说明——以"当前 latest"代替固定 SHA 会毁掉来源可复现性。
-
-**验证**：`node tools/sync-omo-skills.mjs --check` → lock 字段完整、5 个 `omz_target` 全部存在。
-
-**已知缺口**：OmO 许可证 `unverified`（未 clone、未读到 LICENSE）、`commit`/`synced_at` 均为 `null`；按纪律核验回填前禁止合并进 `main`。当时 lock 字段未过 shell 元字符白名单（1.3.0 修复）。
-
----
-
-## 0.5.0 — skills references 补全（2026-09-01）
-
-**范围**
-
-- `skills/ulw-research/references/` 5 个认识论文档：`claim-graph.md`（claim 图与过门）、`intent-diff.md`（意图差分）、`observation-manifest.md`（观测清单）、`verification-economics.md`（验证经济学）、`cause-disappearance.md`（原因消失判据），外加 `worker-prompt.md` 作为强制派发模板。
-- `skills/review-work/references/` 2 个契约文档：`lane-prompts.md`（5 个 lane 的完整派发 prompt，含通用 MUST NOT DO 与全部占位符 `{{BATCH_ID}}` `{{GOAL}}` `{{DIFF}}` `{{DIFF_STAT}}` `{{FILE_CONTENTS}}` `{{DONECLAIM}}` `{{TEST_TRANSCRIPT}}` `{{SCOPE}}` `{{WORKTREE}}`）、`verdict-schema.md`（单 lane 报告 JSON schema、`exhaustive_check` 维度集合、汇总规则、AdversarialVerify JSON 的四字段四枚举、复审上限 2 次与 delta scope）。
-- `skills/ulw-plan/references/` 3 个流程文档：`intent-clear.md` / `intent-unclear.md` / `full-workflow.md`。
-- 每个 references 文档都必须被对应 SKILL.md 显式引用——lane 是叶代理，prompt 之外的上下文它一概看不到，未被引用的契约等于不存在。
-
-**验证**：`protocol.test.mjs` 断言 SKILL.md 声明的 references 全部真实存在且非空，且 references 目录下无未被引用的孤儿文档（双向检查）。
-
-**已知缺口**：`review-work/SKILL.md` 当时尚无 `## references/` 引用段，`verdict-schema.md` 的 AdversarialVerify 契约事实上不可达（1.3.0 修复）。
-
----
-
-## 0.4.0 — hooks M2 关键词检测（2026-09-01）
-
-**范围**
-
-- `hooks/keyword-detect.mjs`（581 行）：`UserPromptSubmit` 时扫描 `ulw`/`ultrawork`/`team`/`hyperplan`（大小写不敏感），命中则把 `commands/<mode>.md` 正文（已剥 frontmatter）经 `additionalContext` 注入本轮上下文——等价于用户手打斜杠命令（DESIGN §8.2，复刻 OmO 的 IntentGate）。
-- `hooks/hooks.json`：`enabled: false`、`timeoutMs: 3000`、`maxOutputBytes: 65536`、matcher 大小写变体正则；`.zcode-plugin/plugin.json` 加回 `hooks: "hooks/hooks.json"`（路径此时才真实存在）。
-- **默认双开关关闭**：`hooks.json` 的 `enabled`（运行层，ZCode 客户端管，一开就是全局）+ 项目 `.zcode/config.json` 的 `omz.keyword_hook`（语义层，按项目粒度）。两道是有意为之——`keyword_hook` 才是真正可靠的那道闸（zcode-guide 指出任何插件贡献 hook 都会自动启用 hook runner，且插件 `hooks.json` 顶层 `enabled` 是否被读取未经证实），`enabled` 视为声明性意图。脚本在语义层关闭时立即返回空对象，不读命令文件、不写任何状态。
-- 三道双重注入防护（B5 + §15.1 误触发红线）：prompt trim 后以 `/` 开头一律不注入；会话级去重标记（`<项目根>/.omz/.mode-injected-<sessionId>`，sessionId 已文件名安全化）；关键词落在行内反引号、三反引号块、引号字符串、Markdown 链接或含 `/`/`.` 的路径 token 内均不命中，且匹配要求两侧不是 ASCII 字母/数字/下划线/连字符（`teamwork`、`myteam`、`multiulw` 不命中）。
-- fail-open 契约：脚本任何异常都输出 `{}` 且退出码 0，不阻断主流程（B15）。失败回退纯 slash command（§10.2 的 V3 回退方案就是"永久 M1"）。
-- `--self-test` 自检模式。
-
-**验证**：`node hooks/keyword-detect.mjs --self-test` 全绿（当前 27/27）。
-
-**已知缺口**：V3 装机实测未做（`session_id`/`cwd` 的真实字段名尚未在本机 guide 中列明，脚本已容忍 `sessionId`/`userPrompt` 等别名）。当时 Markdown 链接屏蔽正则存在灾难性回溯（128KB → 18.4s，必被 3s 超时杀掉）、`projectRoot` 未净化、`isMain` 用 percent-encoded pathname、无注入长度上限——全部在 1.3.0 修复。
+**5 items** of real-environment acceptance remain undone (1.4.0 had six; the one subtracted is exactly V12): **V3**
+(the actual injection behavior of the hook's `additionalContext` — both commands this time went through the slash
+path, which does not trigger the hook), **V4** (the resume adapter — the whole smoke run used task-level fresh spawns
+and never reached the resume path), **V8′** (the timing of the permission prompt on parallel spawns — all spawns this
+time were initiated sequentially, so no parallel scenario was created), **V10** (CodeGraph installation), **V11**
+(real-machine rendering of the Electron dashboard and actual CSP blocking). All five are in the trigger enhancement
+layer, the optional adapter layer or an optional profile, their fallback forms are already the normal shipping
+configuration, and **not one of them can make core unusable**. Another honest boundary: the core main path has only
+been run on **one small feature, one path** — the branches of B18's interrupt-and-resume, `/team`'s claim gate,
+LIGHT/HEAVY tiering, the EXPAND tail, and the 5-lane review were none of them reached this time.
 
 ---
 
-## 0.3.0 — tools/doctor.mjs 离线自检（2026-09-01）
+## 1.4.0 — Writing back the design document and wrap-up alignment (2026-09-01)
 
-**范围**
+1.3.0 finished fixing the code; this version does three things: **write what was learned during implementation back
+into the design document**, clear the residual divergences between spec and implementation, and **use mutation testing
+to verify whether the tests themselves actually go red**. No new features.
 
-- `tools/doctor.mjs`（590 行）七类检查：清单完整性（`plugin.json` 声明路径是否存在）、frontmatter 校验（复用 `validate-frontmatter.mjs`）、agent 数量与 model 核对、`.gitignore` 含 `.omz/`（B14，**只报告不代改**，输出可执行修复命令）、mtime vs 会话启动（B19）、JSON/BOM 编码卫生（B4）、能力探测（Node 版本 / `node:sqlite` / git / codegraph / coordinator / dashboard / profile 降级报告）。
-- `--supply-chain` 子模式做依赖取证。
-- 结论行给单行汇总 `① agents | ② model | ③ gitignore | ④ mtime | ⑤ BOM`，并对每个 WARN/FAIL 给出可执行修复指令（不是笼统报错）。
-- `package.json` 加回 `doctor` / `doctor:supply-chain` 脚本（`tools/doctor.mjs` 此时才存在）。
+**Scope**
 
-**验证**：`node tools/doctor.mjs` 在本仓库输出"结论：无 FAIL"，唯一 WARN 是 codegraph 不可用（`graph` profile 默认关闭，预期）。
+- **DESIGN.md v1.3 → v1.4** (1117 → 1482 lines). Added §17 "Architectural rulings made during implementation" with 12
+  items, each recorded as "the design-time statement → the fact → the ruling → the affected surface"; added nine bug
+  contingency items B22–B30 (all from defects actually hit, not speculation) and four integration risks I7–I10; §10.3
+  gained ten code-level pieces of evidence from the second and third rounds of engine symbol-level reverse-lookup;
+  §10.2's pending empirical items were reordered (the V8 enumeration and the V9 concurrency stress test were settled
+  and moved into §10.1, leaving the six items V3/V4/V8′/V10/V11/V12); the milestone table in §9 gained a "v1.4 actual
+  status" column; §8.2 rewrote the facts about the hook trigger layer.
+- **Anti-fake-testing (the most valuable part of this round).** An independent acceptance audit did mutation testing —
+  copy the whole repository into a temp directory, randomly break the implementation under test, and see whether the
+  corresponding test goes red. It found three **tests that cannot fail**: I10's dashboard authentication tiering
+  (adding `/api/snapshot` to `PUBLIC_PATHS`, or moving the static shell back behind the token gate so the panel is
+  completely unusable, still gave 46/46 pass), B27's sanitization of injected board fields (making `cell()` return the
+  raw value, all 139 cases passed), and B28's numeric wave ordering (switching back to lexicographic order went
+  unnoticed by anyone). The fixes: `dashboard/server.mjs` now has the request pipeline **use**
+  `PUBLIC_PATHS.has(pathname)` for the decision (eliminating the second independent judgment, so changing the constant
+  changes the behavior), and the tests gained a same-source assertion plus a real browser sequence against a service
+  with a non-empty token; a new `tests/render-status.test.mjs` tests `cell()` and `compareWave()` directly and asserts
+  an end-to-end forgery attack. Spot checks turned up three more fake tests of the same kind (`MAX_SSE_STREAMS`,
+  `parseEventCursor`, and the pipeline's loopback gate), all filled in as well. Each of the four mutations was
+  re-verified to go red.
+- **The third round of engine reverse-lookup refuted two premises.** ① The `matcher` in `hooks.json` **takes no part in
+  filtering** on `UserPromptSubmit`: `hookRunner.run(t, r={})` uses the second parameter for matching, while
+  `runUserPromptSubmitHooks` passes only `{signal}`, and the match function returns true unconditionally when
+  matchValues is empty — so "a miss does not even start a node process (saving overhead)" is wrong, and once
+  `keyword_hook` is enabled every user message costs roughly 126–132ms (against a bare `node -e 0` baseline of
+  85–91ms). ② The `permissionMode` enum has now been extracted directly (`acceptEdits`/`auto`/`bypassPermissions`/
+  `default`/`dontAsk`/`plan`), and **no value can remove an individual tool** — so the tightening route "use
+  `permissionMode` to turn Bash into a structural constraint" is not viable, and the two-layer model (Edit/Write
+  structural + Bash disciplinary) is the **final state**, not a transitional one.
+- **New B30 [High]: the main agent cannot obtain the sessionId.** `${ZCODE_SESSION_ID}` is expanded only in the shell
+  execution block context of hooks / MCP / commands; it is not in the env of the Bash tool, and the `<env>` block of
+  the system prompt only has cwd/git/platform/shell/osVersion — while the protocol requires writing the goal to
+  `.omz/goal/<sessionId>.json`. The model will make one up, this round stays self-consistent, the board renders as
+  usual, doctor cannot detect it: **another false success with exit code 0** (the B22 family). The fix:
+  `commands/ulw.md` gained a "Step zero: session identifier" that takes the real value via an inline execution block
+  (and blocks the branch where "the literal `${...}` remains because the engine did not expand it"), and if it cannot
+  be obtained, falls back deterministically to `<ISO timestamp>-<short git HEAD hash>`, with **fabrication expressly
+  forbidden**; and `active_goal` in `boulder.json` is pinned as the only authoritative pointer for finding the goal
+  again across sessions (`session_ids` serves only as an audit clue).
+- **The real names of the MCP tools.** The actual name of a plugin MCP tool has the form
+  `mcp__plugin_omz_omz-coordinator__omz_team_create`, whereas `commands/team.md` and DESIGN §7.2 use bare names
+  throughout — a main agent calling them literally gets tool-not-found (there is a fallback, but it manifests as
+  "orchestration is on yet it is always in the degraded tier", which is extremely hard to diagnose). The fix: the
+  command gained a step zero requiring the caller to match by suffix against its own tool list and take the real name
+  on the spot (no hard-coded long names, so it will not break if the plugin name or the server key changes), and if
+  nothing is found, to conclude the profile is not enabled and go to the core fallback.
+- **Dead fields cleared out of `hooks.json`.** Evidence shows the engine **never reads** the top-level `enabled` and
+  `maxOutputBytes` (`parsePluginHookEvents` takes only `rawHooks.hooks`, and when there are plugin hooks the engine
+  forces `enabled: true`); what actually takes effect is the **element-level** `enabled` inside the hooks array. The
+  two dead fields were deleted and the trade-off written into `_comment` (verified that the engine ignores unknown
+  top-level keys). We deliberately **do not** write an element-level `enabled: false` — that would mean the semantic
+  gate `keyword_hook` is never even reached, and a user wanting to enable it would have to edit the plugin file rather
+  than the project config.
+- **Wrap-up alignment**: `omz-looker`'s tools `[Read]` → `[Read, Bash]` and maxTurns 10 → 15 (with a pure `[Read]` it
+  cannot obtain the paths of the images to inspect, so that role was in fact unusable before); the "full tools"
+  notation in appendix A changed from `tools: []  # 全工具` to **an explicit requirement to omit that line**
+  (`tools: []` is an empty whitelist, the opposite of "omit = inherit all tools", same root cause as B23);
+  `coordinator.sqlite` is settled as **one database for many teams** (the split-database drawing in the v1.3 directory
+  tree was overturned, and isolation is instead carried by the per-team file area plus the `team_id` foreign key inside
+  the database); the nine skeletons in appendix A were aligned field by field with the actual `agents/*.md` files (diff
+  reduced to zero); doctor's summary line changed to `9/9 静态校验OK（spawn ping 未执行）` (the old wording could be
+  misread as V12 being complete); and the `${pluginDir}`, stale byte counts and switch descriptions in the three module
+  READMEs were corrected along with it.
+- **§14 confidence recalibrated**: the denominator changed from "can the design be implemented" to "can the code run
+  as expected in a real environment", overall 98% (design delivery) → **95% (code delivery)**. The read-only sub-item
+  is 70% (the final conclusion of ruling 3), the integration/selection layer 90% (CodeGraph not installed), and the new
+  presentation layer 85%; the concurrency sub-item was raised because the V9 stress test passed.
 
-**已知缺口**：spawn ping 9/9 只能在会话内做（`/omz-doctor` 命令版负责），离线版只做文件级核对；当时 `validate-frontmatter.mjs` 不认 dash 数组，导致只读角色白名单失效时 doctor 仍报 OK（1.3.0 修复）。
+**Verification**
+
+`npm test` **548 tests / 99 suites** all green (1.3.0 was 515/90; this round's anti-fake-testing added 33);
+`node tools/doctor.mjs` no FAIL (the only WARN is that codegraph is not installed on this machine);
+`node tools/validate-frontmatter.mjs .` passes; `node hooks/keyword-detect.mjs --self-test` 27/27. **Four mutation
+verifications**: `/api/snapshot` into `PUBLIC_PATHS` → 10 red; the static shell moved behind the token gate → 3 red
+(including an explicit assertion that "the panel would have no styles and no scripts"); `cell()` returning the raw
+value → 10 red (including "the column count is blown open by injection, 7 !== 4"); `compareWave` switched to
+lexicographic order → 4 red. **The V9 concurrency stress test** (done this round): 8 independent node processes
+competing for the 200 tasks of the same graph → 200 claims within 730ms, unique=200, **0 duplicate claims**, 0
+`SQLITE_BUSY` retries, `verifyGraphInvariants` 0 violations; on a 40-task graph with `max_parallel=8`, all 52
+over-limit attempts returned `reason:'max-parallel'`. Self-check of DESIGN.md cross-references: of the 340 `§`
+references, all 41 distinct ones resolve; B1–B30 are contiguous with no missing numbers; I1–I10 are contiguous; and of
+the 13 V-number references, 0 lack a definition.
+
+**Known gaps**
+
+Six items of real-environment acceptance are still undone, all requiring a real machine or a real ZCode session: V3
+(the hook's `additionalContext` injection behavior), V4 (the resume adapter), V8′ (the permission-prompt behavior on
+parallel spawns), V10 (CodeGraph installation), V11 (real-machine rendering of the Electron dashboard and actual CSP
+blocking), V12 (the spawn ping of the 9 agents inside a session). Each has a documented fallback path, and not one of
+them can make `core` unusable. One more known residue: when `keyword_hook` is not enabled the hook still runs empty
+(about 126–132ms per message), and eliminating that entirely requires disabling the plugin hook at the project/user
+config layer.
 
 ---
 
-## 0.2.0 — adapters/zcode 宿主适配层（2026-09-01）
+## 1.3.0 — Adversarial full audit and fixes; the implementation aligned to DESIGN v1.3 (2026-09-01)
 
-**范围**
+Two independent auditors ran an adversarial audit over the whole repository — one checking **protocol fidelity** (are
+the bodies of agents/commands/skills self-consistent with ZCode's real tool surface, and equivalent to the original
+OmO protocol), the other checking **code security and concurrency** (the MCP server, dashboard, hook, adapters). Every
+defect reported has been fixed, and a regression test was added for each category. This entry is organized by defect
+type, and each item spells out "the actual consequence beforehand", because the danger of most of these defects is not
+that they raise an error but that they **do not**.
 
-- `path.mjs`（305 行，B3/B4 路径与编码卫生）：`stripBom` / `readJsonSafe` / `writeJsonSafe`（无 BOM、LF）、`isWindowsAbsolutePath` / `hasBackslashPath` / `isEscapingPath`、`toPosixRelative`、`classifyPath`、`normalizePathValue` / `normalizePathFields` / `deepNormalizePaths`（`PATH_FIELD_NAMES` 白名单驱动）、`scanJsonHygiene`。
-- `capability.mjs`（256 行，能力探测）：`probeNode` / `probeSqlite` / `probeCommand` / `probeGit` / `probeCodegraph` / `probeCoordinator` / `probeDashboard` / `probeAll`。Windows 上按 `PATHEXT` 逐后缀查找可执行文件。
-- `fallback.mjs`（146 行，profile 解析与降级链）：`loadConfig`（`.zcode/config.json` → `.omz/config.json` 分层）、`resolveProfiles`（能力探测结果对照声明的 profile）、`fallbackFor`、`formatDegradeReport`。四条降级链对应 DESIGN §3.3：`graph` → Explore + Bash grep/rg、`orchestration` → core 波次并行 + `.omz/runtime/` 文件状态、`dashboard` → ZCode GUI 任务面板 + `/omz-status`、M2 hook → slash commands。
-- `transport.mjs`（199 行，worker 状态机与 resume 适配器）：`createRegistry` / `bindAgent` / `markResumeWait` / `markReturned` / `checkTimeouts` / `rebuildPromptContext` / `saveRegistry` / `loadRegistry`。resume 不可用时按 DESIGN §7.4 走"任务级新 spawn + 上下文重建"，不依赖 ZCode 未公开的稳定 resume API（V4 回退）。
-- `index.mjs` 作为统一出口。
+### Security
 
-**验证**：各模块纯函数，无 fs/网络副作用（除显式的 `saveRegistry`/`loadRegistry`/`scanJsonHygiene`）；`doctor` 与 `dashboard` 均复用同一套 probe 与 fallback 逻辑，不存在第二份判定。
+- **`now` removed from the `inputSchema` of the 13 public MCP tools.** Previously the scheduler's clock was open to
+  callers: any worker could call `omz_reclaim_expired({ now: <a future time> })` to have someone else's running task,
+  whose lease had not expired, judged expired and stolen (the original owner was cleared, the task went back to `ready`
+  and was then claimed by another agent); the same trick could bypass the `retry_at` backoff and the `attempts` retry
+  budget. The MCP layer now always passes the server's `nowSec()`; `now` is retained only on the core function
+  signatures as a test injection, is accepted from outside only when `OMZ_TEST_TIME=1`, and every acceptance prints one
+  WARNING line to stderr.
+- **Path traversal via `teamId` and `projectRoot`.** `adapters/zcode/transport.mjs` gained `safeTeamId()` (anything not
+  `[A-Za-z0-9_-]` is always replaced with `_`) and the `assertInsideOmz()` assertion (the resolved target must be under
+  `<projectRoot>/.omz`); `resolveProjectRoot()` in `hooks/keyword-detect.mjs` never trusts a non-absolute path, falls
+  back to `process.cwd()` and records it on stderr. Previously `teamId='../../../evil'` could write the state file
+  outside the project, and on the hook side only `sessionId` was sanitized while `projectRoot` was missed.
+- **ReDoS in the hook.** Markdown link masking originally used the regex `/\[[^\]\r\n]*\]\([^)\r\n]*\)/`, which
+  catastrophically backtracks on degenerate input like `[[[[…](](](…`: a 128KB input measured at **18.4 seconds**, far
+  beyond the `timeoutMs: 3000` in `hooks.json` — an engine timeout kills the process outright, and the fail-open
+  contract "output `{}` under all circumstances" becomes fail-broken on the spot. Changed to a one-way linear scan in
+  `maskMarkdownLinks()`, after which the same input measured **2ms**, worst case O(n). Two more self-protections were
+  added: the scan window `MAX_SCAN = 32KB` (the leading 24KB + the trailing 8KB masked as two independent segments, so
+  that an unclosed triple backtick in the head window cannot straddle the splice point) and the self-imposed budget
+  `SCAN_BUDGET_MS = 1500` (over budget it abandons the analysis immediately and returns `budget-exceeded`; better to
+  miss one detection, since the user can still type `/ulw` explicitly, than to be killed and output zero bytes). The
+  injected body additionally has a `MAX_CONTEXT_BYTES = 48KB` cap; over the limit it degrades to "the leading original
+  text + a list of section headings", preventing the `maxOutputBytes: 65536` hard truncation from cutting out half a
+  JSON document. (*v1.5 correction: engine forensics overturned two points in that last sentence — the engine's default
+  `maxOutputBytes` is **32768**, not 65536, and going over it is not a hard truncation but **the entire injection being
+  discarded silently**; so this 48KB cap sat above the engine's real wall and was not an effective line of defence. The
+  design intent recorded here is unchanged; the fix is in the 1.5.0 entry.*)
+- **Dashboard authentication tiering.** The static shell (`/`, `/index.html`, `/app.js`, `/app.css`) needs no token;
+  the data endpoints (`/api/snapshot`, `/api/events`) must have a token. Previously the static resources were behind
+  the token gate too, while the browser carries `?token=` only on that one address-bar request — the `<link>`/`<script>`
+  subresource requests carry no credentials at all → 401 → the page has no styles and no scripts → **the panel is
+  simply unusable on the default path**. The basis for the tiering is "whether the response contains data": the static
+  shell is bytes fixed at compile time and contains no tasks, paths or token. The token-free set is exported as
+  `PUBLIC_PATHS`.
+- **`/healthz` no longer leaks absolute paths.** It returns only `{ ok, source }`; the reason strings in `degraded[]`
+  contain the absolute path of the coordinator db and have been moved to the token-required `/api/snapshot`. A
+  `HEALTHZ_TTL_MS = 1000` result cache was also added so that an unauthenticated endpoint does not become a CPU
+  amplifier for the full snapshot.
+- **An SSE connection cap and a shared poller.** `MAX_SSE_STREAMS = 8`, over the limit `503 + Retry-After: 5`
+  (previously `streams` was an unbounded Set and 60 connections would all be accepted); all connections share **one**
+  `setInterval` (1500ms) that collects and broadcasts the same snapshot, decoupling CPU cost from the connection count
+  (previously each connection ran its own pair of timers doing a full collection). The timer stops as soon as the last
+  subscriber disconnects, and timers are always `unref()`ed.
+- **eventId localized.** `Last-Event-ID` / `?since=` serve only as the counting start point **for this connection** and
+  are no longer written back to the server's global counter — previously passing `Number.MAX_SAFE_INTEGER` would make
+  `+1` lose precision and pin **all** clients' frame ids to the same value. The input is validated by
+  `parseEventCursor()` (not purely numeric / not a safe integer / `<=0` / `> 2^31-1` are all ignored and it starts from
+  0).
+- **A shell-metacharacter whitelist in `tools/sync-omo-skills.mjs`.** The `url`/`branch`/`path`/`omz_target` in the
+  lock get concatenated into git commands that are printed for a human to copy and run, and previously the url alone in
+  a malicious lock could deliver `; rm -rf` into the user's terminal. These fields now go through a character whitelist
+  first; violations go into `errors` and `exit 1`, and never reach the printout.
 
-**已知缺口**：当时 `deepNormalizePaths` 全量深度遍历（会把 `regex \d+` 破坏成 `regex /d+`）、`toPosixRelative` 跨卷/越界静默返回相对路径、`transport` 侧 `teamId` 无安全化与 `.omz` 边界断言——全部在 1.3.0 修复。
+### Data consistency
+
+The core invariant of the DAG is "downstream ready ⟺ all upstreams done". Once it is broken, **the database itself is
+still self-consistent** (`deps_remaining=0` and `status=ready`) and the error cannot be inferred from the state after
+the fact — so it must be sealed off on the write side, with a separate means of detection kept in reserve.
+
+- **The terminal-state guard + one-time consumption of dependency edges (two layers of duplicate protection, neither
+  dispensable).** `taskComplete`/`taskFail` check the task's status immediately after `idemLookup`: already in the
+  terminal set (`done`/`failed`/`dead`) → return `duplicate: true` straight away and **do not touch downstream at
+  all**. This layer catches repeated calls that carry "no idempotency key" or "a brand-new idempotency key" — the
+  idempotency table is entirely blind to both, and previously a repeated complete would decrement the downstream
+  `deps_remaining` a second time. The second layer is `task_deps.consumed` (added by migration
+  `002-task-deps-consumed.sql`, defaulting to 0): the decrement only processes edges with `consumed = 0` and sets it to
+  1 within the same transaction, so even if the first layer is bypassed (historical dirty data, manual SQL) downstream
+  is not unblocked twice. 002 also backfills historical data (out-edges of already-`done` upstreams are set to
+  `consumed = 1`), so an existing database is immediately self-consistent after the backfill.
+- **Three guards on `taskFail`.** ① A terminal task cannot be failed (otherwise an already-done task is revived to
+  `ready`, its `result_ref` is cleared, and it can be claimed again and completed again → downstream is unblocked a
+  second time); ② an `owner_agent` different from the caller is `NOT_OWNER`, **including the case where `owner_agent`
+  is null** — previously "null means no check" amounted to an open channel for any agent to write `last_error` on and
+  change the status of someone else's task; ③ only a `running` task may be failed, since failing a `blocked` task would
+  change it to `ready`, which is a channel that bypasses dependencies outright.
+- **The idempotency key bound to `task_id`.** The idempotency key is now doubly bound to `(op, task_id)`; a key already
+  used for another `op` or **another task** → `BAD_ARGS`. Previously, using task 1's key for `task_id=2` made
+  `idemLookup` return `{task_id:1, status:'done', unblocked:[2]}` marked `duplicate: true` — on which basis the caller
+  believed task 2 was complete, while what it got was **another task's** result.
+- **`max_parallel` actually takes effect.** Previously it was only stored and echoed back, and a team with
+  `max_parallel=2` could have 5 concurrent `running` tasks. `taskClaim` now counts that team's running tasks **inside
+  the same `BEGIN IMMEDIATE` transaction** and, at the limit, returns
+  `{ task: null, reason: 'max-parallel', running, max_parallel }`. The counting must be done inside the write
+  transaction — "read the count first, then open the transaction" is itself a race, and N concurrent claims would all
+  read a below-limit count; the counting scope is the whole team (across all of that team's graphs), because the
+  concurrency budget is a team-level resource. Callers branch on `reason`: no reason = no ready task for the moment,
+  `max-parallel` = retry later, `team-shutdown` = stop polling.
+- **Added `verifyGraphInvariants(db, { graph_id })`** as a DAG invariant detector (an exported function of core, not an
+  MCP tool; read-only, usable on a readonly handle, to be called by doctor / reconciliation scripts). It reconciles
+  `tasks.deps_remaining` against the real number of unfinished upstreams in `task_deps`, covering 4 classes of
+  violation: `deps-remaining-mismatch`, `dispatched-with-open-upstream`, `blocked-with-no-open-upstream`, and
+  `edge-consumed-but-upstream-not-done` / `edge-unconsumed-but-upstream-done`.
+- **`omz_export_mirror` switched its identifier system to numeric task ids.** The unique constraint on `tasks` is
+  `UNIQUE(graph_id, key)` — a key is unique only **within a graph**, and it is entirely legal for one team to submit
+  two graphs that reuse the same key, in which case using the key as the join key makes the mirror cross-wire (the
+  tasks of the first graph get the title/depends_on of the second). Mirror rows now carry `id` (numeric, unique across
+  the whole database, the join primary key) / `key` (for humans) / `graph_id` / `depends_on` (an array of numeric ids) /
+  `depends_on_keys`. This is a **deliberate deviation** from the DESIGN §7.3 sample and is recorded in
+  `mcp/coordinator/README.md`. On the dashboard side `buildMirrorIndex()` degrades in three tiers: numeric ids present
+  → join by id → only string ids and no duplicate keys within this team → join by key → when duplicate keys exist,
+  **only for those duplicated keys** degrade to no join and write `degraded[]`. Never guess by key: a wrong join is
+  more harmful than a missing field.
+- **`reclaimExpired`'s `last_seen` does not go backwards**: when it sets the original owner's `transport_state` to
+  `unknown` it writes the moment the reclaim happened, not the already-past `lease_until`.
+
+### Usability (the most insidious class: all of them false successes with exit code 0)
+
+- **`isMain` detection switched to `fileURLToPath`.** It previously used `new URL(import.meta.url).pathname`, which is
+  percent-encoded: when the plugin directory contains spaces or non-ASCII characters (extremely common on Windows:
+  `C:\Program Files\`, `C:\Users\张三\`) it is never equal to `process.argv[1]`, so `isMain` is permanently false — the
+  hook outputs 0 bytes, and `doctor`/`status`/`sync`/`validate` all **silently exit 0 doing nothing**. Exit code 0
+  means neither the user nor CI can tell anything is broken. `isMainModule(import.meta.url)` was factored out into
+  `tools/lib/is-main.mjs`, and the 5 CLI entry points (doctor / render-status / validate-frontmatter /
+  sync-omo-skills / keyword-detect) plus `dashboard/server.mjs` and `dashboard/main.mjs` all switched to it.
+- **`validate-frontmatter.mjs` supports dash arrays.** It previously recognized only the inline array
+  `tools: [Read, Bash]`, and the perfectly legal YAML `tools:\n  - Read` was silently parsed as `tools` being absent
+  (= all tools) — the read-only roles' whitelist silently stopped working while doctor reported OK.
+- **`KNOWN_TOOLS` split into `SUBAGENT_TOOLS` and `ENGINE_ONLY_TOOLS`.** `Agent`/`WebSearch`/`Grep`/`Glob` exist in the
+  engine but are unavailable on the subagent side (measured in DESIGN §10.1 V5, §13 B20), and writing them into
+  frontmatter gets them silently ignored. Now the appearance of a member of `ENGINE_ONLY_TOOLS` raises an error
+  explaining why — a silently ignored capability declaration would invalidate the assumption that "read-only roles are
+  constrained by the whitelist".
+- **`deepNormalizePaths` became field-whitelist driven.** Normalization now applies only to fields registered in
+  `PATH_FIELD_NAMES` (array elements inherit the decision from their parent key). Previously the full deep traversal
+  would "normalize" non-path strings as well, for instance corrupting `regex \d+` into `regex /d+`.
+- **The out-of-bounds semantics of `toPosixRelative`.** In the three cases of crossing volumes (`C:` vs `E:`), the
+  device namespace, and a result starting with `..`, it no longer silently returns a relative path (which is a path
+  that does not exist on any machine); it now throws according to `onEscape` or returns an explicit marker.
+- **Numeric wave ordering and title cleaning in `render-status.mjs`.** Waves were previously sorted lexicographically
+  into 1→10→2; titles now have newlines and vertical bars stripped — previously a title containing a newline could
+  forge an entire line that looked like a legitimate task.
+
+### Protocol fidelity
+
+- **The Atlas role rewritten.** `omz-atlas` is a subagent and **structurally has no Agent tool** (measured in DESIGN
+  §10.1 V5), yet its body previously required it to "dispatch execution agents" — once spawned it was bound to violate
+  that. It was changed into a **wave state machine + dispatch-proposal generator + reporter**: it produces a directly
+  pasteable 8-element dispatch proposal (TASK / EXPECTED OUTCOME / baseline + failing-first / REQUIRED SKILLS /
+  REQUIRED TOOLS / MUST DO / MUST NOT DO / CONTEXT) + a suggested `subagent_type` + a LIGHT/HEAVY annotation, and asks
+  the main agent to perform the spawn. It is also made explicit that it **receives no background notifications**
+  (notifications go only to the main agent), so its collection-point criterion is solely whether the results file
+  exists and is parseable.
+- **`ulw-plan` had its structural-constraint explanation filled in.** Prometheus likewise cannot spawn, and three
+  places in the file previously ordered it to dispatch Explore/critic.
+- **`ulw-execute` had the full text of the 10 Hard rules added.** Previously there was only one copy, in
+  `commands/ulw.md`, which a subagent cannot reach — it gets neither the session history nor the expanded content of
+  the command. The two copies are now required to be identical word for word, with a sync reminder comment left in the
+  file.
+- **`ulw-research` had the PDF + DOCX delivery toolchain added** (headless chrome printing + pandoc, including a
+  fallback that probes chrome executables one by one on Windows, with the path that hits recorded into the
+  observation-manifest).
+- **`review-work` had a `references/` citation section added.** The AdversarialVerify JSON contract in
+  `verdict-schema.md` was previously unreachable in practice because SKILL.md did not reference it.
+- **The read-only roles' "structural guarantee" wording corrected to an honest version.** Bash inside
+  `tools: [Read, Bash]` can write files (redirection, `sed -i`, `node -e`), so the body's earlier claim "you physically
+  cannot change the code" was an incorrect self-assessment. The wording now is "the tool surface stops Edit/Write, it
+  does not stop Bash from writing files, so this one is on you to uphold", with the forbidden commands listed one by
+  one; `omz-reviewer`'s `git worktree add/lock/unlock/remove` is the only explicitly exempted command set.
+- **Tool-surface corrections.** `omz-librarian` had the unavailable `WebSearch` removed (now `[Read, Bash, WebFetch]`,
+  with the body stating explicitly "you have no search-engine tool; when there is no link, report clearly that the main
+  agent must provide an entry point, and never fabricate from memory"); `omz-looker` went from having only `Read` to
+  `[Read, Bash]` (previously it could not enumerate image paths).
+- **The `boulder.json` pointer is written the moment the goal is registered** (step two of `commands/ulw.md`), no
+  longer waiting until the wrap-up. Previously, if the session was interrupted before the first wave, cross-session
+  resumption had no pointer to consult at all (B18).
+- **`commands/ulw.md` split into eight steps** aligned with DESIGN §6 (activation / goal registration / skill inventory
+  / determinism assurance / the planning threshold / execution / dual-evidence verification / the review gate and
+  commit). An honest statement about the Stop hook was added at the same time: it is an **unimplemented item**
+  (`hooks/hooks.json` currently registers only `UserPromptSubmit`), progress is persisted by the main agent actively
+  writing `boulder.json` after each wave's collection point, and one **must not rely on** the hook to save progress on
+  abnormal termination.
+
+**Verification**
+
+- `npm test` → **515 tests / 90 suites all passing, 0 failures** (`node --test tests/`, about 13.6s). By file:
+  coordinator 100, path 82, hooks 68, protocol 48, dashboard 46, transport 37, capability 33, server-mcp 31, cli 30,
+  fallback 25, integration 15. (After 1.4.0's anti-fake-testing was filled in, it became 548 / 99.)
+- `node tools/doctor.mjs` → no FAIL; `① agents 9/9 OK | ② model OK | ③ gitignore OK | ④ mtime OK | ⑤ BOM OK`, the only
+  WARN being that codegraph is unavailable (the `graph` profile is off by default, as expected).
+- `node tools/validate-frontmatter.mjs .` → passes (agents/commands/skills).
+- `node hooks/keyword-detect.mjs --self-test` → **27/27 passing**, including two cases aimed at this round's fixes:
+  "degenerate Markdown link input, 32K, stays within budget (linear scan)" and "the `İ` prefix + `team` index
+  alignment".
+- `node tools/sync-omo-skills.mjs --check` → the lock fields are complete and all 5 `omz_target`s exist; 3 WARNs
+  (commit not pinned / synced_at not recorded / the OmO license `unverified`), all of them the expected state of "a
+  real sync has not been performed yet".
+- `tests/protocol.test.mjs` contains cross-file contract assertions: the four AdversarialVerify fields and four enums
+  are identical word for word in `omz-reviewer.md` and `verdict-schema.md`, the re-review cap of 2 matches in both
+  places, the state enums close the loop three ways (the coordinator's 7 states + the file view's `pending`/`corrupt` =
+  the `STATES` in `app.js` = the `.pill[data-state]` selectors in `app.css`), `skills/*/references/` has no orphan
+  documents, every path declared in `plugin.json` exists, the whole repository is free of BOMs, and every `.json` file
+  is parseable.
+
+**Known gaps**
+
+- **The three installed-environment measurements V3 / V4 / V8 of DESIGN §10.2 are not done** (the actual injection
+  behavior of the hook's `additionalContext`, the behavior of the resume adapter, the `permissionMode` enum and the
+  permission prompt on parallel spawns). Each of the three has a documented fallback path.
+- The `graph` profile requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the
+  target project; this repository contains no index for it, and doctor can currently only report "unavailable".
+- **The Stop hook (DESIGN §9 M4) is not implemented**, so the constitutional checklist on abnormal termination still
+  relies on the main agent's self-discipline.
+- The 9/9 spawn ping of `omz-doctor` must be run **inside a session** (the offline doctor can only do file-level
+  checks); the agent list is a session-startup snapshot (B19), so the session must be restarted after installation.
+- The OmO upstream license is still `unverified` and `commit` is not pinned — under the discipline in
+  `upstream/README.md`, merging into `main` is forbidden until verification is backfilled.
+- The single-writer pressure on the coordinator's SQLite (DESIGN §13.5 I4) has only unit-level concurrency tests; there
+  is no long-duration stress sample.
 
 ---
 
-## 0.1.0 — core profile 骨架（2026-09-01）
+## 1.2.0 — The test suite established (2026-09-01)
 
-**范围**
+**Scope**
 
-- `agents/` 9 个子代理定义（omz-planner / critic / deep / junior / atlas / oracle / reviewer / librarian / looker），内置 `Explore` 复用不重复定义（DESIGN 附录 A）。
-- `commands/` 5 个斜杠命令（ulw / team / hyperplan / omz-status / omz-doctor，DESIGN 附录 B）。
-- `skills/` 4 个核心协议（ulw-plan / ulw-execute / ulw-research / review-work，DESIGN 附录 C），description 均写严格触发语义（普通问答不得激活）。
-- `tools/validate-frontmatter.mjs`（B1/B10 防线）、`tools/render-status.mjs`（`/omz-status` 执行体，40 行上限 + BOM 容错）。
+- 11 test files (`tests/*.test.mjs`) covering path / fallback / capability / transport / coordinator / server-mcp /
+  dashboard / hooks / protocol / cli / integration, all using the built-in `node:test`, with zero test-framework
+  dependencies.
+- `package.json` completed with `test` plus 10 per-file `test:*` scripts; `tests/index.js` as the aggregate entry
+  point.
+- `protocol.test.mjs` turns documentation consistency into assertions (the agent count and naming, read-only roles'
+  tools containing no Edit/Write, full-tool roles not declaring tools, maxTurns being mandatory, frontmatter having no
+  unknown fields, the 8 elements and the 10 Hard rules all present, all 8 categories being in the routing table, the
+  functional equivalence of the two status rendering paths, the state enums closing the loop three ways, references
+  having no orphans, encoding hygiene, and upstream lock evidence).
+- `cli.test.mjs` asserts for each CLI entry point that `isMainModule` still holds under paths containing spaces or
+  non-ASCII characters — this test is the gatekeeper for the "silently exit 0" defect of 1.3.0.
 
-**清单收敛（本版的关键决定）**
+**Verification**: `node --test tests/` and `npm test` are equivalent and usable; 354 tests all green when it was
+established (1.3.0's audit fixes pushed it to 515, and 1.4.0's anti-fake-testing pushed it to 548).
 
-- `.zcode-plugin/plugin.json` 曾声明 `hooks: "hooks/hooks.json"` 与 `mcpServers.omz-coordinator → mcp/coordinator/server.mjs`，但两个路径均不存在——清单指向空文件会让 ZCode 插件加载报错或静默失败。0.1.0 收敛为仅声明已落地的 `agents`/`commands`/`skills`；hooks 在 0.4.0 加回，coordinator 在 0.9.0 加回。
-- `package.json` 曾声明 5 个 `test:*` 脚本与 `doctor` 脚本，指向不存在的 `tests/` 与 `tools/doctor.mjs`。0.1.0 收敛为 `validate` + `status`，随对应里程碑逐步加回。
+**Known gaps**: no end-to-end installed-environment test (that needs a real ZCode session); coverage not measured.
 
-**验证**：`npm run validate` 通过（9 agents + 5 commands + 4 skills 全部 frontmatter 合规）；`node tools/render-status.mjs` 在空 `.omz/` 下输出"无状态"提示而非报错。
+---
 
-**已知缺口**：无 adapters / hooks / coordinator / dashboard / tests / upstream 锁定；doctor 只有会话内命令版本，无离线可执行体；Atlas 正文当时仍假设自己能 spawn（1.3.0 重写）。
+## 1.1.0 — dashboard: the loopback HTTP/SSE read-only presentation layer (2026-09-01)
 
+**Scope**
+
+- `dashboard/server.mjs` (793 lines), a pure HTTP + SSE service with zero third-party dependencies;
+  `dashboard/main.mjs`, the Electron shell (automatically degrading to pure HTTP when Electron is absent);
+  `dashboard/preload.mjs`, exposing only `getBootInfo()` through `contextBridge` (**this file was deleted in 1.5.0, see
+  "Removed the dashboard preload" in that entry**).
+- The `dashboard/renderer/` trio (`index.html` / `app.js` / `app.css`): zero inline scripts or styles; server strings
+  go only through `textContent`/`createTextNode`, with ANSI and control characters stripped before rendering, and
+  truncation past 2000 characters marked.
+- A dual-track data source: it first opens the coordinator SQLite read-only and goes through `core.status()` →
+  `source: 'coordinator'`; if the db is missing/corrupt/the query fails, it falls back to the `.omz/` file view of
+  `tools/render-status.mjs` → `source: 'files'`, with the reason written to `degraded[]`, and **never a 500**.
+- The read-only contract: all endpoints are GET, any other method is always 405; there is no write/submit/retry/
+  command-execution endpoint at all — the dashboard cannot enlarge the main agent's privileges (DESIGN §15.3-4).
+- Seven security protections (corresponding to §13.5 I5): binding to loopback only (the origin is judged **before**
+  token validation, and a non-loopback request gets a straight 403 + `socket.destroy()`), a random port (`port = 0`), a
+  random token at every startup (`randomBytes(24)` + `timingSafeEqual`), a CORS whitelist (no `Origin` is let through,
+  anything else is 403; the absolute-form host in the request line is validated too), SSE emitting only the structured
+  `snapshot`/`heartbeat` events, CSP forbidding inline script, and a minimal preload surface (**the last one was
+  withdrawn in 1.5.0 along with the deletion of preload; I5 is now six, see that entry**).
+- `transport_state` (the agents table) and `coordinator_state` (tasks.status) are always two separate columns, never
+  inferred from each other or merged (I3); when the file view has no transport dimension, `transport_state` is always
+  `null`.
+
+**Verification**: the URL (including the token) is printed only to stderr, and stdout stays clean; SIGINT shuts down
+gracefully. `node dashboard/server.mjs --project <dir> --port 0` can be started standalone.
+
+**Known gaps**: at the time the static resources were behind the token gate too (browser subresources carry no token →
+the panel is unusable by default), `/healthz` returned a `degraded[]` containing absolute paths, SSE had no connection
+cap and each connection ran its own full collection, and eventId was written back to the global counter — all four
+fixed in 1.3.0.
+
+---
+
+## 0.9.0 — mcp/coordinator: the SQLite-backed DAG scheduling sidecar (2026-09-01)
+
+**Scope**
+
+- `mcp/coordinator/server.mjs` (stdio JSON-RPC) + `core.mjs` (968 lines of pure logic) + `db.mjs` (the migration runner
+  and connection management) + `schema.sql` + `migrations/001-init.sql`. Zero third-party dependencies, using only the
+  built-in `node:sqlite` (hence `engines.node >= 22.5.0`; startup prints an ExperimentalWarning, which is normal)
+  (**raised to `>=22.13.0` in 1.5.0 — on 22.5–22.12 that module sits behind the `--experimental-sqlite` flag, see that
+  entry**).
+- **13 MCP tools**: `omz_team_create` / `omz_dag_submit` / `omz_task_claim` / `omz_task_heartbeat` /
+  `omz_task_complete` / `omz_task_fail` / `omz_mail_send` / `omz_mail_receive` / `omz_mail_ack` / `omz_status` /
+  `omz_team_shutdown` / `omz_reclaim_expired` / `omz_export_mirror`.
+- Transaction-boundary discipline (DESIGN §7.2 / §13.5 I4): claim uses `BEGIN IMMEDIATE` + a single
+  `UPDATE ... RETURNING` (`RETURNING` is not a lock; without IMMEDIATE two writers would read the same ready row);
+  **a write transaction is never held while an external agent is executing**, and claim COMMITs as soon as it returns;
+  `core.mjs` imports only `node:crypto` and `./db.mjs`, with no fs/spawn/network, so on `SQLITE_BUSY` the whole
+  transaction including its callback can safely be replayed.
+- `PRAGMA journal_mode=WAL; busy_timeout=5000; foreign_keys=ON` + bounded exponential backoff (base 25ms, at most 5
+  attempts, with jitter), throwing `BUSY_TIMEOUT` past the limit; timestamps are uniformly integer unix seconds, on the
+  same scale as `unixepoch()`.
+- at-least-once semantics + idempotency keys (mandatory for `complete`/`fail`, `send` uses `dedupe_key`, and `ack` is
+  naturally idempotent per message); a repeated call returns the first result marked `duplicate: true`.
+- Cycles and unknown keys are rejected before anything is written to the database; the mailbox's `seq` is `MAX+1`
+  within the transaction, with no holes; the `counts` field set of `status()`/`exportMirror()` is a constant 7 states
+  (including `unknown`) and does not drift with the states actually present in the database.
+- Migration discipline: `migrations/*.sql` are replayed in lexicographic order by filename, published files are
+  **never modified**, and structural changes are append-only; because SQLite's `ALTER TABLE ADD COLUMN` has no
+  `IF NOT EXISTS`, the runner supports the file-leading directive `-- @skip-if-column <table>.<column>`.
+- `.zcode-plugin/plugin.json` got `mcpServers.omz-coordinator` back (`enabled: false`, the `${ZCODE_PLUGIN_ROOT}`
+  variable, with `OMZ_COORDINATOR_DB` pointing at `${ZCODE_PROJECT_DIR}/.omz/runtime/coordinator.sqlite`) — the path
+  only genuinely exists as of now.
+
+**Verification**: a manual smoke test (feeding three lines, `initialize` / `tools/list` / `omz_team_create`, into
+stdin) produced three lines of valid JSON on stdout, with `tools/list` returning 13 tools; stdout carries only
+JSON-RPC and all logging goes to stderr; a tool-level failure returns a tool result with `isError: true` rather than a
+JSON-RPC error, an unknown method `-32601`, and a parse failure `-32700`.
+
+**Known gaps**: at the time `now` was exposed in the inputSchema of the 13 tools, `max_parallel` was stored but unused,
+the idempotency key was not bound to a task, `taskFail` did not verify identity when `owner_agent` was null, there was
+no terminal-state guard and no one-time consumption of edges, there was no `verifyGraphInvariants`, and `exportMirror`
+joined by key — all fixed in 1.3.0 (the `consumed` column was introduced by
+`migrations/002-task-deps-consumed.sql`).
+
+---
+
+## 0.6.0 — Upstream source pinning and selective-sync discipline (2026-09-01)
+
+**Scope**
+
+- `upstream/omo-sources.lock.json`: the upstream repository/branch/pinned commit SHA/sync time/the mapping of ported
+  paths ↔ OMZ target files/`ignored_paths`/the license record. **It records only provenance and porting status; it does
+  not store upstream code** (DESIGN §16.2).
+- `tools/sync-omo-skills.mjs`: `--check` (lock field completeness + the existence of `omz_target`, exit 1 on ERROR) /
+  `--plan` (prints the list of git commands to be executed by hand) / `--pin <40-digit lowercase hex SHA>` (writes back
+  `commit` + `synced_at`, output free of BOM and LF-terminated). **It only prints commands and never executes git** —
+  upstream sync must be reviewed by a human.
+- `upstream/README.md` records the branch discipline (`main` / `upstream-sync` / `porting/<date>`,
+  **`git merge upstream/dev` is forbidden**), the 5-step sync procedure, the 5 host-API paths that are never ported
+  (`omo-opencode` / `omo-codex` / `team-core` / `tmux-core` / `model-core`) and the criteria for them, and the license
+  and NOTICE requirements.
+- The `commit` field never carries a guessed value: when not pinned it is always `null` + a `commit_status`
+  explanation — substituting "current latest" for a fixed SHA would destroy the reproducibility of provenance.
+
+**Verification**: `node tools/sync-omo-skills.mjs --check` → the lock fields are complete and all 5 `omz_target`s
+exist.
+
+**Known gaps**: the OmO license is `unverified` (not cloned, the LICENSE not read) and `commit`/`synced_at` are both
+`null`; under the discipline, merging into `main` is forbidden until verification is backfilled. At the time the lock
+fields did not go through a shell-metacharacter whitelist (fixed in 1.3.0).
+
+---
+
+## 0.5.0 — skills references completed (2026-09-01)
+
+**Scope**
+
+- 5 epistemology documents in `skills/ulw-research/references/`: `claim-graph.md` (the claim graph and its gate),
+  `intent-diff.md` (intent differencing), `observation-manifest.md` (the observation manifest),
+  `verification-economics.md` (the economics of verification), `cause-disappearance.md` (the cause-disappearance
+  criterion), plus `worker-prompt.md` as the mandatory dispatch template.
+- 2 contract documents in `skills/review-work/references/`: `lane-prompts.md` (the complete dispatch prompts for the 5
+  lanes, including the common MUST NOT DO and all the placeholders `{{BATCH_ID}}` `{{GOAL}}` `{{DIFF}}`
+  `{{DIFF_STAT}}` `{{FILE_CONTENTS}}` `{{DONECLAIM}}` `{{TEST_TRANSCRIPT}}` `{{SCOPE}}` `{{WORKTREE}}`) and
+  `verdict-schema.md` (the JSON schema of a single lane's report, the `exhaustive_check` dimension set, the aggregation
+  rules, the four fields and four enums of the AdversarialVerify JSON, the re-review cap of 2 and the delta scope).
+- 3 process documents in `skills/ulw-plan/references/`: `intent-clear.md` / `intent-unclear.md` / `full-workflow.md`.
+- Every references document must be explicitly referenced by the corresponding SKILL.md — a lane is a leaf agent and
+  sees no context beyond its prompt, so an unreferenced contract amounts to one that does not exist.
+
+**Verification**: `protocol.test.mjs` asserts that all references declared by SKILL.md genuinely exist and are
+non-empty, and that there are no orphan documents under the references directory that nothing references (a
+bidirectional check).
+
+**Known gaps**: `review-work/SKILL.md` had no `## references/` citation section at the time, so the AdversarialVerify
+contract in `verdict-schema.md` was in fact unreachable (fixed in 1.3.0).
+
+---
+
+## 0.4.0 — hooks M2 keyword detection (2026-09-01)
+
+**Scope**
+
+- `hooks/keyword-detect.mjs` (581 lines): on `UserPromptSubmit` it scans for `ulw`/`ultrawork`/`team`/`hyperplan`
+  (case-insensitive), and on a hit injects the body of `commands/<mode>.md` (frontmatter already stripped) into the
+  current turn's context through `additionalContext` — equivalent to the user typing the slash command (DESIGN §8.2,
+  reproducing OmO's IntentGate).
+- `hooks/hooks.json`: `enabled: false`, `timeoutMs: 3000`, `maxOutputBytes: 65536`, and a matcher regex covering the
+  case variants; `.zcode-plugin/plugin.json` got `hooks: "hooks/hooks.json"` back (the path only genuinely exists as of
+  now). (*v1.5 correction: the engine's default `maxOutputBytes` is in fact **32768**, and both top-level fields were
+  deleted in v1.4 because the engine never reads them — see the 1.5.0 entry.*)
+- **Both switches are off by default**: `enabled` in `hooks.json` (the runtime layer, managed by the ZCode client;
+  turning it on is global) + `omz.keyword_hook` in the project's `.zcode/config.json` (the semantic layer, at project
+  granularity). The two are deliberate — `keyword_hook` is the one that is genuinely reliable (zcode-guide points out
+  that any hook contributed by a plugin automatically enables the hook runner, and whether a plugin `hooks.json`'s
+  top-level `enabled` is read at all is unproven), and `enabled` is treated as declarative intent. When the semantic
+  layer is off, the script returns an empty object immediately, reading no command file and writing no state.
+- Three guards against double injection (B5 + the §15.1 false-trigger red line): a prompt that starts with `/` after
+  trimming is never injected into; a session-level dedupe marker (`<project root>/.omz/.mode-injected-<sessionId>`,
+  with the sessionId already made filename-safe); and a keyword falling inside inline backticks, a triple-backtick
+  block, a quoted string, a Markdown link, or a path token containing `/` or `.` does not match, while a match also
+  requires that neither side is an ASCII letter, digit, underscore or hyphen (`teamwork`, `myteam`, `multiulw` do not
+  match).
+- The fail-open contract: any exception in the script still outputs `{}` with exit code 0 and does not block the main
+  flow (B15). On failure it falls back to plain slash commands (the V3 fallback plan in §10.2 is exactly "permanent
+  M1").
+- A `--self-test` self-check mode.
+
+**Verification**: `node hooks/keyword-detect.mjs --self-test` all green (currently 27/27).
+
+**Known gaps**: the V3 installed-environment measurement is not done (the real field names of `session_id`/`cwd` are
+not yet listed in the guide on this machine; the script already tolerates aliases such as `sessionId`/`userPrompt`). At
+the time the Markdown link masking regex had catastrophic backtracking (128KB → 18.4s, certain to be killed by the 3s
+timeout), `projectRoot` was not sanitized, `isMain` used the percent-encoded pathname, and there was no injection
+length cap — all fixed in 1.3.0.
+
+---
+
+## 0.3.0 — tools/doctor.mjs offline self-check (2026-09-01)
+
+**Scope**
+
+- `tools/doctor.mjs` (590 lines) with seven classes of check: manifest completeness (do the paths declared in
+  `plugin.json` exist), frontmatter validation (reusing `validate-frontmatter.mjs`), the agent count and model
+  reconciliation, `.gitignore` containing `.omz/` (B14, **report only, never edit on the user's behalf**, printing an
+  executable fix command), mtime vs session start (B19), JSON/BOM encoding hygiene (B4), and capability probing (Node
+  version / `node:sqlite` / git / codegraph / coordinator / dashboard / the profile degradation report).
+- A `--supply-chain` sub-mode does dependency evidence gathering.
+- The conclusion line gives a one-line summary `① agents | ② model | ③ gitignore | ④ mtime | ⑤ BOM`, and gives an
+  executable fix instruction for every WARN/FAIL (not a vague error).
+- `package.json` got the `doctor` / `doctor:supply-chain` scripts back (`tools/doctor.mjs` only exists as of now).
+
+**Verification**: `node tools/doctor.mjs` outputs "结论：无 FAIL" on this repository, the only WARN being that
+codegraph is unavailable (the `graph` profile is off by default, as expected).
+
+**Known gaps**: the 9/9 spawn ping can only be done inside a session (the `/omz-doctor` command version is responsible
+for that), and the offline version does file-level checks only; at the time `validate-frontmatter.mjs` did not
+recognize dash arrays, so doctor still reported OK when a read-only role's whitelist had stopped working (fixed in
+1.3.0).
+
+---
+
+## 0.2.0 — adapters/zcode, the host adaptation layer (2026-09-01)
+
+**Scope**
+
+- `path.mjs` (305 lines, B3/B4 path and encoding hygiene): `stripBom` / `readJsonSafe` / `writeJsonSafe` (no BOM, LF),
+  `isWindowsAbsolutePath` / `hasBackslashPath` / `isEscapingPath`, `toPosixRelative`, `classifyPath`,
+  `normalizePathValue` / `normalizePathFields` / `deepNormalizePaths` (driven by the `PATH_FIELD_NAMES` whitelist),
+  `scanJsonHygiene`.
+- `capability.mjs` (256 lines, capability probing): `probeNode` / `probeSqlite` / `probeCommand` / `probeGit` /
+  `probeCodegraph` / `probeCoordinator` / `probeDashboard` / `probeAll`. On Windows it looks for the executable by
+  trying each suffix in `PATHEXT`.
+- `fallback.mjs` (146 lines, profile resolution and the degradation chain): `loadConfig` (the `.zcode/config.json` →
+  `.omz/config.json` layering), `resolveProfiles` (checking the capability probe results against the declared
+  profiles), `fallbackFor`, `formatDegradeReport`. The four degradation chains correspond to DESIGN §3.3: `graph` →
+  Explore + Bash grep/rg, `orchestration` → core wave parallelism + `.omz/runtime/` file state, `dashboard` → the ZCode
+  GUI task panel + `/omz-status`, and the M2 hook → slash commands.
+- `transport.mjs` (199 lines, the worker state machine and the resume adapter): `createRegistry` / `bindAgent` /
+  `markResumeWait` / `markReturned` / `checkTimeouts` / `rebuildPromptContext` / `saveRegistry` / `loadRegistry`. When
+  resume is unavailable it follows DESIGN §7.4 with "a task-level fresh spawn + context reconstruction", not depending
+  on any undisclosed stable resume API of ZCode (the V4 fallback).
+- `index.mjs` as the unified exit point.
+
+**Verification**: each module is pure functions with no fs/network side effects (except the explicit `saveRegistry`/
+`loadRegistry`/`scanJsonHygiene`); `doctor` and `dashboard` both reuse the same probe and fallback logic, so there is no
+second copy of the decision.
+
+**Known gaps**: at the time `deepNormalizePaths` did a full deep traversal (corrupting `regex \d+` into `regex /d+`),
+`toPosixRelative` silently returned a relative path when crossing volumes or going out of bounds, and the `transport`
+side had no `teamId` sanitization and no `.omz` boundary assertion — all fixed in 1.3.0.
+
+---
+
+## 0.1.0 — The core profile skeleton (2026-09-01)
+
+**Scope**
+
+- `agents/`, 9 subagent definitions (omz-planner / critic / deep / junior / atlas / oracle / reviewer / librarian /
+  looker), reusing the built-in `Explore` rather than defining it again (DESIGN appendix A).
+- `commands/`, 5 slash commands (ulw / team / hyperplan / omz-status / omz-doctor, DESIGN appendix B).
+- `skills/`, 4 core protocols (ulw-plan / ulw-execute / ulw-research / review-work, DESIGN appendix C), each with a
+  description spelling out strict trigger semantics (ordinary Q&A must not activate them).
+- `tools/validate-frontmatter.mjs` (the B1/B10 line of defense), `tools/render-status.mjs` (the executable body of
+  `/omz-status`, with a 40-line cap and BOM tolerance).
+
+**Manifest convergence (this version's key decision)**
+
+- `.zcode-plugin/plugin.json` once declared `hooks: "hooks/hooks.json"` and
+  `mcpServers.omz-coordinator → mcp/coordinator/server.mjs`, but neither path existed — a manifest pointing at empty
+  files makes ZCode's plugin loading raise an error or fail silently. 0.1.0 converged to declaring only what had landed:
+  `agents`/`commands`/`skills`; hooks came back in 0.4.0 and the coordinator in 0.9.0.
+- `package.json` once declared 5 `test:*` scripts and a `doctor` script pointing at a non-existent `tests/` and
+  `tools/doctor.mjs`. 0.1.0 converged to `validate` + `status`, with the rest added back milestone by milestone.
+
+**Verification**: `npm run validate` passes (9 agents + 5 commands + 4 skills, all frontmatter compliant);
+`node tools/render-status.mjs` prints a "no state" notice rather than an error under an empty `.omz/`.
+
+**Known gaps**: no adapters / hooks / coordinator / dashboard / tests / upstream pinning; doctor existed only as the
+in-session command version, with no offline executable; and Atlas's body still assumed at the time that it could spawn
+(rewritten in 1.3.0).
 

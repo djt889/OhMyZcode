@@ -14,6 +14,11 @@ import { spawnSync } from 'node:child_process';
 import {
   MODE_KEYWORDS,
   SCAN_BUDGET_MS,
+  ENGINE_DEFAULT_MAX_OUTPUT_BYTES,
+  PAYLOAD_SAFETY_MARGIN_BYTES,
+  MAX_PAYLOAD_BYTES,
+  MAX_CONTEXT_BYTES,
+  payloadBytes,
   maskCodeContext,
   maskMarkdownLinks,
   scanSegments,
@@ -23,6 +28,7 @@ import {
   markInjected,
   alreadyInjected,
   buildAdditionalContext,
+  buildAdditionalContextDetailed,
   handleHook
 } from '../hooks/keyword-detect.mjs';
 
@@ -421,6 +427,218 @@ describe('buildAdditionalContext', () => {
     assert.equal(buildAdditionalContext('nope', PLUGIN_ROOT, []), null);
     assert.equal(buildAdditionalContext('ulw', '', []), null);
     assert.equal(buildAdditionalContext('ulw', null, []), null);
+  });
+});
+
+/**
+ * 注入长度上限（blocker 级缺陷的回归防线）。
+ *
+ * 引擎缺省 `maxOutputBytes` 是 **32768**（不是 65536），取证于 `E:/APP/Zcode/resources/glm/zcode.cjs`：
+ * `hooks:{enabled:!1,events:{},maxOutputBytes:32768,timeoutMs:6e4}`、
+ * `jdi={enabled:!1,events:{},maxOutputBytes:32768,timeoutMs:6e4}`、归并缺省常量 `AEo=32768`、
+ * 以及 `maxOutputBytes:e?.maxOutputBytes??32768` / `Q.hooks?.maxOutputBytes??32768` 两处兜底。
+ * 超限的后果不是安全截断：hook 走 executionPort 时 `OutputCollector` 丢弃超出部分（`truncated` 标记
+ * 在 hook 路径上从不被读），`parseHookStdout` 对半截 JSON `catch{return}` —— **整段注入被静默丢弃**；
+ * 另一形态 `runGitCommand` 直接 `o.kill()` + `exitCode:-1`。两者都是 fail-broken。
+ *
+ * 历史错位：`MAX_CONTEXT_BYTES = 48 * 1024`（49152）> 32768，且它约束的是 additionalContext
+ * **字符串**字节数，而引擎量的是 **stdout 的 JSON 负载**（实测 11105 → 11372，差 267，中文/转义越多差越大）。
+ * 现在唯一权威闸门是 `payloadBytes(text) <= MAX_PAYLOAD_BYTES`，下面把这些不变量全部钉死。
+ */
+describe('注入负载预算与降级', () => {
+  /** 造只有 commands/ 的假插件根，用来喂超预算的命令文件 */
+  function fakePluginRoot(name, files) {
+    const root = path.join(TMP, `fake-plugin-${name}`);
+    fs.mkdirSync(path.join(root, 'commands'), { recursive: true });
+    for (const [file, content] of Object.entries(files)) {
+      fs.writeFileSync(path.join(root, 'commands', file), content, 'utf8');
+    }
+    return root;
+  }
+
+  it('ENGINE_DEFAULT_MAX_OUTPUT_BYTES 是引擎缺省的 32768（不是 hooks.json 里那个已删的 65536）', () => {
+    assert.equal(ENGINE_DEFAULT_MAX_OUTPUT_BYTES, 32768);
+    // hooks.json 顶层不得再出现 maxOutputBytes（引擎从不读它，写了只会误导）
+    const rawHooks = fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf8');
+    const parsed = JSON.parse(rawHooks);
+    assert.equal(Object.hasOwn(parsed, 'maxOutputBytes'), false, 'hooks.json 顶层不该有 maxOutputBytes');
+  });
+
+  it('预算 + 安全余量 <= 引擎缺省上限（我们的墙必须低于引擎真墙）', () => {
+    assert.ok(
+      MAX_PAYLOAD_BYTES + PAYLOAD_SAFETY_MARGIN_BYTES <= ENGINE_DEFAULT_MAX_OUTPUT_BYTES,
+      `预算(${MAX_PAYLOAD_BYTES}) + 余量(${PAYLOAD_SAFETY_MARGIN_BYTES}) 必须 <= 引擎缺省(${ENGINE_DEFAULT_MAX_OUTPUT_BYTES})`
+    );
+    assert.ok(MAX_PAYLOAD_BYTES < ENGINE_DEFAULT_MAX_OUTPUT_BYTES, '预算不得触到引擎缺省上限');
+    assert.ok(PAYLOAD_SAFETY_MARGIN_BYTES >= 4096, '余量太小则用户把 maxOutputBytes 调小后防线即失效');
+    assert.equal(MAX_PAYLOAD_BYTES, 24576, '预算是 24KB（缺省 32768 - 8KB 余量）');
+  });
+
+  it('MAX_CONTEXT_BYTES 是由负载预算反推的字符串软上限，不再是独立魔法数', () => {
+    const envelope = Buffer.byteLength(JSON.stringify({ additionalContext: '' }), 'utf8');
+    assert.equal(MAX_CONTEXT_BYTES, MAX_PAYLOAD_BYTES - envelope);
+    assert.ok(MAX_CONTEXT_BYTES < MAX_PAYLOAD_BYTES, '字符串软上限必须严格小于负载预算');
+    assert.ok(MAX_CONTEXT_BYTES < ENGINE_DEFAULT_MAX_OUTPUT_BYTES, '历史 bug：49152 > 32768 属防线错位');
+  });
+
+  it('payloadBytes 量的是 stdout 的 JSON 负载，恒 >= 字符串字节数（转义与信封开销）', () => {
+    const text = buildAdditionalContext('ulw', PLUGIN_ROOT, ['ulw']);
+    const strBytes = Buffer.byteLength(text, 'utf8');
+    assert.ok(payloadBytes(text) > strBytes, 'JSON 负载必须大于字符串本身（信封 + 转义）');
+    assert.equal(payloadBytes(text), Buffer.byteLength(JSON.stringify({ additionalContext: text }), 'utf8'));
+    // 转义放大最坏形态：每个 `"` 变两字节，每个控制字符变 6 字节
+    assert.ok(payloadBytes('"'.repeat(100)) >= 200);
+    assert.ok(payloadBytes('\u0001'.repeat(100)) >= 600);
+  });
+
+  it('不变量：三个 mode 的 JSON 负载都 < 预算（有人再调大常量又错位就会红）', () => {
+    for (const mode of ['ulw', 'team', 'hyperplan']) {
+      const text = buildAdditionalContext(mode, PLUGIN_ROOT, [mode]);
+      const bytes = payloadBytes(text);
+      assert.ok(bytes < MAX_PAYLOAD_BYTES, `${mode} 的 JSON 负载 ${bytes} 必须 < 预算 ${MAX_PAYLOAD_BYTES}`);
+      assert.ok(bytes < ENGINE_DEFAULT_MAX_OUTPUT_BYTES, `${mode} 的 JSON 负载 ${bytes} 必须 < 引擎缺省上限`);
+    }
+  });
+
+  it('回归哨兵：真实 ulw.md 的 JSON 负载 < 预算（ulw.md 再膨胀先撞这条，而不是撞引擎）', () => {
+    const built = buildAdditionalContextDetailed('ulw', PLUGIN_ROOT, ['ultrawork']);
+    assert.equal(built.level, 'full', 'ulw.md 当前不该触发降级');
+    assert.ok(
+      built.payloadBytes < MAX_PAYLOAD_BYTES,
+      `ulw.md 的 JSON 负载 ${built.payloadBytes} 已达/超预算 ${MAX_PAYLOAD_BYTES}：` +
+        '要么精简 commands/ulw.md，要么重新论证预算——不要直接调大常量'
+    );
+    // 余量倍数写进断言：低于 1.5x 就该在膨胀失控前先看到红灯
+    const ratio = MAX_PAYLOAD_BYTES / built.payloadBytes;
+    assert.ok(ratio > 1.5, `ulw.md 余量仅 ${ratio.toFixed(2)}x，已进入危险区（预算 ${MAX_PAYLOAD_BYTES}）`);
+  });
+
+  it('一级降级：超预算命令文件降为 headings，且降级后负载仍在预算内', () => {
+    const root = fakePluginRoot('oversize', {
+      'ulw.md': `---\ndescription: x\n---\n# 大标题\n${'内容内容内容内容内容内容内容内容\n'.repeat(3000)}\n## 次级标题\n收尾\n`
+    });
+    const built = buildAdditionalContextDetailed('ulw', root, ['ulw']);
+    assert.equal(built.level, 'headings');
+    assert.ok(built.bodyBytes > MAX_PAYLOAD_BYTES, '前置条件：正文本身必须超预算');
+    assert.ok(built.payloadBytes <= MAX_PAYLOAD_BYTES, `降级后负载 ${built.payloadBytes} 仍超预算 ${MAX_PAYLOAD_BYTES}`);
+    assert.equal(payloadBytes(built.text), built.payloadBytes, '自报负载必须与实测一致');
+    assert.match(built.text, /章节清单/, '一级降级必须保留章节标题清单');
+    assert.match(built.text, /\/ulw/, '必须提示显式执行 /ulw 拿全文');
+  });
+
+  it('二级降级：连章节清单都超预算时降为 minimal，且最终负载仍在预算内', () => {
+    const root = fakePluginRoot('headings', {
+      'team.md': `---\ndescription: x\n---\n${Array.from({ length: 4000 }, (_, i) => `## 章节标题编号 ${i} 的说明文字`).join('\n')}\n`
+    });
+    const built = buildAdditionalContextDetailed('team', root, ['team']);
+    assert.equal(built.level, 'minimal', '几千个标题行必须逼出二级降级');
+    assert.ok(built.payloadBytes <= MAX_PAYLOAD_BYTES, `二级降级后负载 ${built.payloadBytes} 仍超预算`);
+    assert.match(built.text, /内容过长，请显式执行 \/team/, '二级降级必须给出显式命令提示');
+    assert.equal(/协议章节清单（全文见/.test(built.text), false, '二级降级不应再渲染一级的章节清单块');
+    // 一级降级确实被尝试过并被判定放不下：同输入在更大预算下应回到 headings
+    const roomy = buildAdditionalContextDetailed('team', root, ['team'], { maxPayloadBytes: 300 * 1024 });
+    assert.equal(roomy.level, 'full', '预算足够大时同一文件不该降级——证明降级是预算驱动的');
+  });
+
+  it('JSON 转义放大也不能突破预算（引号/反斜杠密集的正文）', () => {
+    const root = fakePluginRoot('escape', {
+      'hyperplan.md': `---\nd: x\n---\n# H\n${'"\\\\"控制\u0001符\n'.repeat(4000)}`
+    });
+    const built = buildAdditionalContextDetailed('hyperplan', root, ['hyperplan']);
+    assert.ok(built.payloadBytes <= MAX_PAYLOAD_BYTES, `转义放大下负载 ${built.payloadBytes} 超预算`);
+    assert.ok(
+      built.payloadBytes > Buffer.byteLength(built.text, 'utf8'),
+      '这类正文的负载必须显著大于字符串字节数——正是「按字符串判定」会漏掉的形态'
+    );
+  });
+
+  it('不存在「降级了但仍超限」的路径：从病态小预算到正常预算全程扫描', () => {
+    const root = fakePluginRoot('sweep', {
+      'ulw.md': `---\nd: x\n---\n# T\n${'正文内容与"引号"混排\n'.repeat(2000)}${'## 小节标题\n'.repeat(500)}`
+    });
+    for (const budget of [24, 32, 64, 128, 512, 2048, 8192, 24576]) {
+      const built = buildAdditionalContextDetailed('ulw', root, ['ulw'], { maxPayloadBytes: budget });
+      assert.ok(
+        built.payloadBytes <= budget,
+        `预算 ${budget} 下返回的负载 ${built.payloadBytes}（level=${built.level}）越界`
+      );
+      assert.equal(payloadBytes(built.text), built.payloadBytes);
+      assert.doesNotThrow(() => JSON.parse(JSON.stringify({ additionalContext: built.text })));
+    }
+  });
+
+  it('空章节的超长正文（无任何标题行）也能降级且不越预算', () => {
+    const root = fakePluginRoot('noheading', {
+      'team.md': `---\nd: x\n---\n${'一段没有任何 Markdown 标题的长正文。'.repeat(2000)}`
+    });
+    const built = buildAdditionalContextDetailed('team', root, ['team']);
+    assert.ok(['headings', 'minimal'].includes(built.level));
+    assert.ok(built.payloadBytes <= MAX_PAYLOAD_BYTES);
+  });
+
+  it('降级路径本身要在 3s 引擎超时内完成（二分实测负载是 O(n log n)，不能吃掉超时预算）', () => {
+    // 5MB 病态正文：二分每一步都要 JSON.stringify 整个前缀，代价随文件线性放大。
+    // 与 detectMode 的 SCAN_BUDGET_MS=1500 叠加后必须仍远低于 hooks.json 的 timeoutMs=3000——
+    // 被引擎杀掉是零字节输出，比降级失败更糟（fail-open 契约直接失效）。
+    const root = fakePluginRoot('perf', {
+      'team.md': `---\nd: x\n---\n${'## 章节\n内容内容内容\n'.repeat(150000)}`
+    });
+    const t0 = Date.now();
+    const built = buildAdditionalContextDetailed('team', root, ['team']);
+    const ms = Date.now() - t0;
+    assert.ok(built.payloadBytes <= MAX_PAYLOAD_BYTES);
+    assert.ok(ms < 1500, `5MB 正文降级耗时 ${ms}ms，与 timeoutMs=3000 余量不足（含 detectMode 的 1500ms 预算）`);
+  });
+
+  it('handleHook 回报 injectionLevel 与 payloadBytes，且真实注入恒在预算内', () => {
+    const root = makeRoot(ENABLED);
+    const r = handleHook(
+      { prompt: 'ulw 修复登录', session_id: 's-budget', cwd: root },
+      { projectRoot: root, pluginRoot: PLUGIN_ROOT }
+    );
+    assert.equal(r.inject, true);
+    assert.equal(r.injectionLevel, 'full');
+    assert.equal(r.payloadBytes, payloadBytes(r.additionalContext));
+    assert.ok(r.payloadBytes < MAX_PAYLOAD_BYTES);
+  });
+
+  it('降级时 stderr 记一行（原始字节数 / 预算 / 降到哪一级），stdout 不受影响', () => {
+    const root = makeRoot(ENABLED);
+    const fake = fakePluginRoot('stderr-line', {
+      'ulw.md': `---\nd: x\n---\n# T\n${'内容内容内容内容内容内容\n'.repeat(3000)}\n## S\n`
+    });
+    const r = spawnSync(process.execPath, [HOOK_SCRIPT], {
+      input: JSON.stringify({ prompt: 'ulw 上', session_id: 'sess_degrade', cwd: root }),
+      encoding: 'utf8',
+      cwd: root,
+      timeout: 30000,
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: fake, ZCODE_PLUGIN_ROOT: fake }
+    });
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /已降级为 headings/);
+    assert.match(r.stderr, /超过负载预算 24576/);
+    assert.match(r.stderr, /maxOutputBytes=32768/);
+    const parsed = JSON.parse(r.stdout);
+    assert.deepEqual(Object.keys(parsed), ['additionalContext']);
+    assert.ok(Buffer.byteLength(r.stdout, 'utf8') <= MAX_PAYLOAD_BYTES, 'stdout 字节数就是引擎量的那个数');
+  });
+
+  it('进程级：真实注入的 stdout 字节数在预算内且是合法 JSON（引擎量的就是 stdout）', () => {
+    const root = makeRoot(ENABLED);
+    const r = spawnSync(process.execPath, [HOOK_SCRIPT], {
+      input: JSON.stringify({ prompt: 'ulw 修复登录 bug', session_id: 'sess_payload', cwd: root }),
+      encoding: 'utf8',
+      cwd: root,
+      timeout: 30000,
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT }
+    });
+    assert.equal(r.status, 0);
+    const stdoutBytes = Buffer.byteLength(r.stdout, 'utf8');
+    assert.ok(stdoutBytes < MAX_PAYLOAD_BYTES, `stdout ${stdoutBytes} 字节超出预算 ${MAX_PAYLOAD_BYTES}`);
+    assert.ok(stdoutBytes < ENGINE_DEFAULT_MAX_OUTPUT_BYTES, 'stdout 必须低于引擎缺省上限');
+    const parsed = JSON.parse(r.stdout);
+    assert.deepEqual(Object.keys(parsed), ['additionalContext']);
+    assert.equal(payloadBytes(parsed.additionalContext), stdoutBytes, 'payloadBytes 必须等于真实 stdout 字节数');
   });
 });
 

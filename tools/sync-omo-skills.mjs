@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonSafe, writeJsonSafe } from '../adapters/zcode/path.mjs';
 import { isMainModule, moduleDir } from './lib/is-main.mjs';
+import { evaluateLicenseEntry, licenseReasonText } from './lib/license-gate.mjs';
 
 const LOCK_REL = 'upstream/omo-sources.lock.json';
 const SHA_RE = /^[0-9a-f]{40}$/;
@@ -114,12 +115,43 @@ export function loadLock(root) {
     });
   }
 
+  /**
+   * 许可证判据：与 tools/doctor.mjs 的 supply:upstream-license **共用**
+   * tools/lib/license-gate.mjs 的 evaluateLicenseEntry()（同一函数、同一组判据）。
+   * 此前这里只要求 `status` 字段存在且不以 `unverified` 开头——比 doctor 松两个量级：
+   * status:"pending"/"TODO"/"x" 都静默通过，且完全不看 spdx/verified_at/verified_via。
+   * 本工具比 doctor 多判一条：doctor 的 supply:upstream-license 只看 license.omo，
+   * 这里对 license 下每个已登记条目都判（omo + codegraph）。
+   *
+   * **严重度是本工具自己的职责，与 doctor 有意不同**（不要抹平）：
+   *   · missing（整条 license.<key> 记录不存在）或 status 字段缺失 → ERROR/exit 1：
+   *     保持本工具**原有的退出码契约**（原实现对 `!lic[key].status` 就是 push 到 errors）。
+   *     字段缺失是 lock 结构问题，与"核验没做完"不是一回事；靠共享判据返回的 statusPresent 区分，
+   *     不能因为收紧判据就把它降成 WARN——那是用重构掩盖行为变更。
+   *   · 其余 unverified（status 存在但写着 pending/unverified/…）与 incomplete → WARN（退出码仍 0）：
+   *     本工具是同步前的提示，不是发布门；同一状态在 doctor --supply-chain 里是 FAIL（仅 omo 会让它变红）。
+   */
   const lic = lock.license;
   if (lic && typeof lic === 'object') {
     for (const key of ['omo', 'codegraph']) {
-      if (!lic[key]) errors.push(`${LOCK_REL}: license 缺 '${key}' 记录`);
-      else if (!lic[key].status) errors.push(`${LOCK_REL}: license.${key} 缺 'status'`);
-      else if (/^unverified/.test(lic[key].status)) warnings.push(`license.${key} 未核验：${lic[key].status}（未核验前禁止合并进 main）`);
+      const r = evaluateLicenseEntry(lic[key], { key });
+      if (r.level === 'missing') {
+        errors.push(`${LOCK_REL}: license 缺 '${key}' 记录`);
+        continue;
+      }
+      if (!r.statusPresent) {
+        errors.push(`${LOCK_REL}: license.${key} 缺 'status'`);
+        continue;
+      }
+      if (r.level === 'ok') continue;
+      const tail = r.level === 'unverified' ? '（未核验前禁止合并进 main）' : `（需回填：${r.missingFields.join('、')}）`;
+      // doctor 的 supply:upstream-license 只判 license.omo；codegraph 的供应链取证由 supply:codegraph
+      // 与 NOTICE 承担，别把它说成会让 doctor 变红。
+      const cross =
+        key === 'omo'
+          ? '——doctor --supply-chain 对此判 FAIL（本工具只提示，退出码仍 0）'
+          : '——doctor 的 supply:upstream-license 只判 license.omo，本条只在这里提示（退出码仍 0）';
+      warnings.push(`${licenseReasonText(r)}${tail}${cross}`);
     }
   } else if (lic !== undefined) {
     errors.push(`${LOCK_REL}: license 必须是对象`);

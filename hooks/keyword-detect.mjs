@@ -13,6 +13,8 @@
  * - Windows：node 实现（不用 PowerShell，B4 BOM 坑）；JSON 读写一律走 adapters/zcode/path.mjs。
  * - 3s 超时预算是硬约束：hooks.json 的 timeoutMs=3000 会直接杀进程，被杀就是「无输出」，
  *   fail-open 契约瞬间变成 fail-broken。因此屏蔽分析全程线性扫描 + 自我预算保护（见 SCAN_BUDGET_MS）。
+ * - maxOutputBytes 同理是硬约束：引擎量的是 **stdout 的完整 JSON 负载**、缺省仅 32768，超限即整段注入
+ *   被静默丢弃（见 ENGINE_DEFAULT_MAX_OUTPUT_BYTES 的取证）。注入体一律按 MAX_PAYLOAD_BYTES 自我裁剪。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -331,14 +333,61 @@ export function markInjected(projectRoot, sessionId, mode) {
 const MODE_FILES = { ulw: 'ulw.md', team: 'team.md', hyperplan: 'hyperplan.md' };
 
 /**
- * additionalContext 硬上限。
- * hooks.json 的 maxOutputBytes=65536 是**引擎侧截断**：注入体（commands/*.md 全文）一旦超过它，
- * 输出会被切成半截 JSON，hook 由 fail-open 直接变 fail-broken（引擎解析失败）。
- * 48KB 给 JSON 转义（\n、中文 \uXXXX 视实现而定）与 banner 留出安全余量。
+ * 引擎缺省 `maxOutputBytes` = 32768。取证（本机 `E:/APP/Zcode/resources/glm/zcode.cjs` 反查，五处同值）：
+ * - 运行时缺省配置：`hooks:{enabled:!1,events:{},maxOutputBytes:32768,timeoutMs:6e4}`
+ * - 另一处同值兜底：`jdi={enabled:!1,events:{},maxOutputBytes:32768,timeoutMs:6e4}`
+ * - hook 配置归并的缺省常量 `AEo=32768`（`L2e()` 在没有任何 scope 指定时取它）
+ * - 插件 hook 合并进运行时 hooks 配置：`maxOutputBytes:e?.maxOutputBytes??32768`
+ * - 工作区 hook 的 runtimeRoot：`maxOutputBytes:Q.hooks?.maxOutputBytes??32768`
+ * 本文件旧注释里的 65536 来自 `hooks.json` 顶层那个**引擎从不读取**的死字段（v1.4 已删），不是引擎真值。
+ *
+ * 超限后的真实后果是 fail-broken，且引擎**不会**替我们优雅降级——两条路径都已反查确证：
+ * - 插件 / 工作区 hook 走 executionPort：`outputLimit:{maxBufferBytes:i.maxOutputBytes,
+ *   maxInlineBytes:i.maxOutputBytes,persistOutput:"none"}`；`OutputCollector.append()` 在
+ *   `this.inlineBytes>=this.maxInlineBytes` 后丢弃余下 chunk（只置 `truncated` 标记，hook 路径从不读它），
+ *   于是 `parseHookStdout()` 拿到半截 JSON 后 `try{JSON.parse(r)}catch{return}` —— **静默 undefined，
+ *   注入被无声丢掉**，连一条错误都不产生（比报错更难发现）。
+ * - 另一形态 `runGitCommand()` 是**直接杀进程**：`Buffer.byteLength(i,'utf8')>r.maxOutputBytes&&
+ *   (o.kill(),l({exitCode:-1,stdout:i}))`。它服务 `resolveWorkspaceGitBranch`（自带 512 字节缺省），
+ *   不在 hook 执行链上；但它说明引擎对「超出 maxOutputBytes」的通用态度是杀/丢，不是安全截断。
+ * 结论：注入体必须**在写 stdout 之前**就落在预算内。
  */
-export const MAX_CONTEXT_BYTES = 48 * 1024;
+export const ENGINE_DEFAULT_MAX_OUTPUT_BYTES = 32768;
+
+/**
+ * 预算余量。`maxOutputBytes` 可被用户配置（`~/.zcode/cli/config.json` 的 `hooks.maxOutputBytes`）或
+ * 工作区配置改小，而 hook 进程**拿不到那个值**（引擎不通过 stdin/env 下发），只能按缺省值下限保守估。
+ * 8KB = 缺省值的 25%：既能吸收「用户把上限调到 24–32KB」这类常见收紧，也不至于把可注入体压得没意义。
+ */
+export const PAYLOAD_SAFETY_MARGIN_BYTES = 8 * 1024;
+
+/**
+ * stdout 的 JSON 负载预算（24576）。**这才是判定对象**：引擎量的是 stdout 累计字节数，
+ * 也就是 `JSON.stringify({additionalContext})` 的完整字节数，而不是 additionalContext 字符串本身。
+ * 实测差值：`additionalContext` 11105 字节 → JSON 负载 11372（+267），转义越多差得越大。
+ */
+export const MAX_PAYLOAD_BYTES = ENGINE_DEFAULT_MAX_OUTPUT_BYTES - PAYLOAD_SAFETY_MARGIN_BYTES;
 
 const utf8Len = (s) => Buffer.byteLength(s, 'utf8');
+
+/** JSON 信封固定开销：`{"additionalContext":""}` = 24 字节（不含正文与转义） */
+const JSON_ENVELOPE_BYTES = utf8Len(JSON.stringify({ additionalContext: '' }));
+
+/**
+ * `additionalContext` 字符串的**软**上限（24552），由负载预算反推：`MAX_PAYLOAD_BYTES - 信封开销`。
+ *
+ * 它**不参与任何判定**——降级逻辑一律直接二分实测 JSON 负载（见 fitHeadBytes）。保留它只有两个作用：
+ * ① 既有导出面（外部读者/文档引用的那个"注入上限"符号）不断裂；② 给人一个"字符串大概能写多长"的量级参考。
+ * 之所以派生而非手写：JSON 转义（`"` `\` 控制字符最多 1→6 字节）让字符串长度与负载没有固定关系，
+ * 任何手写的字符串上限都可能像 v1.5 之前的 48KB（49152 > 引擎 32768）那样悄悄错位到引擎真墙之上；
+ * 派生之后它恒 < MAX_PAYLOAD_BYTES < ENGINE_DEFAULT_MAX_OUTPUT_BYTES，这条不变量由测试钉死。
+ */
+export const MAX_CONTEXT_BYTES = MAX_PAYLOAD_BYTES - JSON_ENVELOPE_BYTES;
+
+/** 引擎在 stdout 上真正量的字节数：完整 JSON 负载，不是 additionalContext 字符串 */
+export function payloadBytes(additionalContext) {
+  return utf8Len(JSON.stringify({ additionalContext: String(additionalContext ?? '') }));
+}
 
 /** 按 UTF-8 字节数截断到字符边界（不切出半个码点） */
 function truncateUtf8(text, maxBytes) {
@@ -349,28 +398,96 @@ function truncateUtf8(text, maxBytes) {
 }
 
 /**
- * 超限降级：头部（协议开头的目的/约束段）+ 各 Markdown 章节标题清单 + 显式提示。
- * 与「原文截断」相比，保留章节骨架能让模型知道协议还有哪些部分，并明确告知走 /<mode> 拿全文。
+ * 硬裁到负载预算内：最后一道兜底，只在「连提示行都放不下」的病态预算下触发。
+ * 前缀越短负载越小（单调），故可二分。宁可把注释切断，也不能让负载越预算。
  */
-function summarizeBody(mode, body, budgetBytes) {
+function fitToPayload(text, maxPayloadBytes) {
+  if (payloadBytes(text) <= maxPayloadBytes) return text;
+  let lo = 0;
+  let hi = utf8Len(text);
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    if (payloadBytes(truncateUtf8(text, mid)) <= maxPayloadBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return truncateUtf8(text, lo);
+}
+
+/**
+ * 求「头窗最多能放多少字节」：payload(compose(h)) 对 h 单调不减（更长前缀 → 更长 JSON），故可二分。
+ * 返回 -1 表示连 h=0（不带头部）都超预算，调用方据此再降一级。
+ * 二分而非「按超出量回减」：JSON 转义可以把 1 字节放大成 6 字节（`"` → `\"`、控制字符 → `\uXXXX`），
+ * 线性回减在这种输入上会一次性把头窗砍到 0，浪费掉本来放得下的空间。
+ */
+function fitHeadBytes(compose, maxBytes, maxPayloadBytes) {
+  if (payloadBytes(compose(0)) > maxPayloadBytes) return -1;
+  let lo = 0;
+  let hi = maxBytes;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    if (payloadBytes(compose(mid)) <= maxPayloadBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/**
+ * 一级降级：头部（协议开头的目的/约束段）+ 各 Markdown 章节标题清单 + 显式提示。
+ * 与「原文截断」相比，保留章节骨架能让模型知道协议还有哪些部分，并明确告知走 /<mode> 拿全文。
+ *
+ * ⚠️ 自我验证：字符串长度只是自变量，闸门是 JSON 负载——头窗大小由 fitHeadBytes 二分实测得出。
+ * 章节清单与提示行始终完整保留（它们才是降级的价值）；清单本身就撑爆预算时返回 null，降到二级。
+ */
+function summarizeBody(mode, body, banner, maxPayloadBytes) {
   const headings = body
     .split(/\r?\n/)
     .filter((l) => /^#{1,4}\s+\S/.test(l))
     .map((l) => l.trim());
   const tail =
-    `\n\n<!-- OMZ keyword hook: 协议全文 ${utf8Len(body)} 字节，超过注入上限 ${budgetBytes} 字节，` +
+    `\n\n<!-- OMZ keyword hook: 协议全文 ${utf8Len(body)} 字节，超过注入负载预算 ${maxPayloadBytes} 字节，` +
     `已降级为「头部 + 章节清单」。需要完整协议请显式执行 /${mode}。 -->\n` +
     (headings.length ? `\n协议章节清单（全文见 /${mode}）：\n${headings.map((h) => `- ${h.replace(/^#+\s*/, '')}`).join('\n')}\n` : '');
-  const headBudget = Math.max(512, budgetBytes - utf8Len(tail));
-  return truncateUtf8(body, headBudget) + tail;
+  const compose = (h) => `${banner}\n\n${h > 0 ? truncateUtf8(body, h) : ''}${tail}`;
+  const head = fitHeadBytes(compose, utf8Len(body), maxPayloadBytes);
+  return head < 0 ? null : compose(head);
 }
 
 /**
- * 注入文本 = 来源说明行 + 命令体。缺文件返回 null（不注入、不抛）。
- * 说明行让模型知道这段协议来自 hook 而非用户，等价 /<mode>，便于人工排查上下文来源。
- * 超过 MAX_CONTEXT_BYTES 时降级为摘要，并在 stderr 记一行（引擎截断的后果比漏注入严重得多）。
+ * 二级降级：只保留头部 + 一行「内容过长，请显式跑 /<mode>」。
+ * 章节清单本身就超预算时（例如几千个 `## ` 标题）走这里。头窗同样二分实测；
+ * 末尾 fitToPayload 是兜底，保证**不存在**「降级了但仍超限」的返回路径。
  */
-export function buildAdditionalContext(mode, pluginRoot, matched = [], { maxBytes = MAX_CONTEXT_BYTES } = {}) {
+function minimalBody(mode, body, banner, maxPayloadBytes) {
+  const notice =
+    `\n\n<!-- OMZ keyword hook: 协议全文 ${utf8Len(body)} 字节，连「章节清单」都超出注入负载预算 ` +
+    `${maxPayloadBytes} 字节，已降到最简：仅保留开头。内容过长，请显式执行 /${mode} 获取完整协议。 -->\n`;
+  const compose = (h) => `${banner}\n\n${h > 0 ? truncateUtf8(body, h) : ''}${notice}`;
+  const head = fitHeadBytes(compose, utf8Len(body), maxPayloadBytes);
+  // head < 0 只可能出现在病态预算（banner+提示行本身就超）——硬裁保底，绝不返回超预算的串
+  return head < 0 ? fitToPayload(compose(0), maxPayloadBytes) : compose(head);
+}
+
+/** 降级诊断只走 stderr（stdout 必须保持严格 schema）；stderr 不可写不影响注入 */
+function warnDegrade(file, level, bodyBytes, fullPayload, maxPayloadBytes, finalPayload) {
+  try {
+    process.stderr.write(
+      `omz keyword hook: commands/${file} 正文 ${bodyBytes} 字节（原始 JSON 负载 ${fullPayload} 字节）超过负载预算 ` +
+        `${maxPayloadBytes} 字节，已降级为 ${level}（降级后负载 ${finalPayload} 字节；` +
+        `引擎缺省 maxOutputBytes=${ENGINE_DEFAULT_MAX_OUTPUT_BYTES}，超限会静默丢弃整段注入）\n`
+    );
+  } catch {
+    /* stderr 不可写不影响注入 */
+  }
+}
+
+/**
+ * 注入文本 = 来源说明行 + 命令体，并附带降级诊断。缺文件返回 null（不注入、不抛）。
+ * 说明行让模型知道这段协议来自 hook 而非用户，等价 /<mode>，便于人工排查上下文来源。
+ *
+ * 判定对象是 **stdout 的完整 JSON 负载**（payloadBytes），不是 additionalContext 字符串——
+ * 引擎量的就是 stdout 字节数。三级：full → headings → minimal，每级返回前都实测负载。
+ */
+export function buildAdditionalContextDetailed(mode, pluginRoot, matched = [], { maxPayloadBytes = MAX_PAYLOAD_BYTES } = {}) {
   const file = MODE_FILES[mode];
   if (!file || !pluginRoot) return null;
   const full = path.join(String(pluginRoot), 'commands', file);
@@ -384,16 +501,31 @@ export function buildAdditionalContext(mode, pluginRoot, matched = [], { maxByte
   if (!body.trim()) return null;
   const words = (Array.isArray(matched) ? matched : [matched]).filter(Boolean).join(', ');
   const banner = `<!-- OMZ keyword hook: 检测到 "${words || mode}"，注入 ${mode} 模式协议（等价 /${mode}） -->`;
-  const bodyBudget = maxBytes - utf8Len(banner) - 2;
-  if (utf8Len(body) <= bodyBudget) return `${banner}\n\n${body}`;
-  try {
-    process.stderr.write(
-      `omz keyword hook: commands/${file} 正文 ${utf8Len(body)} 字节超过注入上限 ${maxBytes}，已降级为摘要注入（避免被 maxOutputBytes 截断成非法 JSON）\n`
-    );
-  } catch {
-    /* stderr 不可写不影响注入 */
+  const bodyBytes = utf8Len(body);
+
+  const whole = `${banner}\n\n${body}`;
+  const wholePayload = payloadBytes(whole);
+  if (wholePayload <= maxPayloadBytes) {
+    return { text: whole, level: 'full', payloadBytes: wholePayload, bodyBytes };
   }
-  return `${banner}\n\n${summarizeBody(mode, body, bodyBudget)}`;
+
+  const summarized = summarizeBody(mode, body, banner, maxPayloadBytes);
+  if (summarized !== null) {
+    const p = payloadBytes(summarized);
+    warnDegrade(file, 'headings（头部+章节清单）', bodyBytes, wholePayload, maxPayloadBytes, p);
+    return { text: summarized, level: 'headings', payloadBytes: p, bodyBytes };
+  }
+
+  const minimal = minimalBody(mode, body, banner, maxPayloadBytes);
+  const p = payloadBytes(minimal);
+  warnDegrade(file, 'minimal（仅头部+提示行）', bodyBytes, wholePayload, maxPayloadBytes, p);
+  return { text: minimal, level: 'minimal', payloadBytes: p, bodyBytes };
+}
+
+/** 兼容既有调用面：只要注入文本。判定与降级全在 buildAdditionalContextDetailed 内。 */
+export function buildAdditionalContext(mode, pluginRoot, matched = [], options = {}) {
+  const r = buildAdditionalContextDetailed(mode, pluginRoot, matched, options);
+  return r === null ? null : r.text;
 }
 
 /** 剥掉 YAML frontmatter（命令体才是协议本文；description 是命令面板用的，注入无意义） */
@@ -422,8 +554,8 @@ export function handleHook(input, ctx = {}) {
     return { inject: false, mode: det.mode, reason: 'already-injected' };
   }
 
-  const additionalContext = buildAdditionalContext(det.mode, pluginRoot, det.matched);
-  if (!additionalContext) return { inject: false, mode: det.mode, reason: 'command-missing' };
+  const built = buildAdditionalContextDetailed(det.mode, pluginRoot, det.matched);
+  if (!built || !built.text) return { inject: false, mode: det.mode, reason: 'command-missing' };
 
   const marked = markInjected(projectRoot, sessionId, det.mode);
   return {
@@ -432,7 +564,9 @@ export function handleHook(input, ctx = {}) {
     matched: det.matched,
     reason: det.reason,
     marker: marked.ok ? 'written' : `write-failed: ${marked.error}`,
-    additionalContext
+    injectionLevel: built.level,
+    payloadBytes: built.payloadBytes,
+    additionalContext: built.text
   };
 }
 
@@ -524,8 +658,50 @@ const CASES = [
     name: 'İ 前缀 + `team` + 真实 team → 仍命中 team（索引对齐）',
     prompt: 'İ `team` real team',
     expect: { inject: true, mode: 'team' }
+  },
+  // 以下三例守住注入长度上限：判定对象必须是 stdout 的 JSON 负载（不是 additionalContext 字符串），
+  // 且两级降级后都必须仍在预算内——「降级了但仍超限」等于降级逻辑自身有 bug 却不自知。
+  {
+    name: '真实 ulw.md → level=full 且 JSON 负载在预算内',
+    prompt: 'ulw 修复登录 bug',
+    derive: withinBudget,
+    expect: { inject: true, mode: 'ulw', injectionLevel: 'full', payloadWithinBudget: true }
+  },
+  {
+    name: '超预算命令文件 → 降级 headings 且负载仍在预算内',
+    prompt: 'ulw 上',
+    pluginRoot: (tmp) => fakeCommandsRoot(tmp, 'oversize', {
+      'ulw.md': `---\ndescription: x\n---\n# 大标题\n${'内容内容内容内容内容内容内容内容\n'.repeat(3000)}\n## 次级标题\n收尾\n`
+    }),
+    derive: withinBudget,
+    expect: { inject: true, mode: 'ulw', injectionLevel: 'headings', payloadWithinBudget: true }
+  },
+  {
+    name: '几千个章节标题 → 降级 minimal 且负载仍在预算内',
+    prompt: 'team 上',
+    pluginRoot: (tmp) => fakeCommandsRoot(tmp, 'headings', {
+      'team.md': `---\ndescription: x\n---\n${Array.from({ length: 4000 }, (_, i) => `## 章节标题编号 ${i} 的说明文字`).join('\n')}\n`
+    }),
+    derive: withinBudget,
+    expect: { inject: true, mode: 'team', injectionLevel: 'minimal', payloadWithinBudget: true }
   }
 ];
+
+/** self-test 用：把「负载是否在预算内」变成可断言的布尔（判定对象是 JSON 负载，不是字符串长度） */
+function withinBudget(got) {
+  const bytes = typeof got?.additionalContext === 'string' ? payloadBytes(got.additionalContext) : NaN;
+  return { payloadWithinBudget: Number.isFinite(bytes) && bytes <= MAX_PAYLOAD_BYTES };
+}
+
+/** self-test 用：在 tmp 下造一个只有 commands/ 的假插件根，用来喂超预算的命令文件 */
+function fakeCommandsRoot(tmpRoot, name, files) {
+  const root = path.join(tmpRoot, `fake-plugin-${name}`);
+  fs.mkdirSync(path.join(root, 'commands'), { recursive: true });
+  for (const [file, content] of Object.entries(files)) {
+    fs.writeFileSync(path.join(root, 'commands', file), content, 'utf8');
+  }
+  return root;
+}
 
 function selfTest() {
   const tmpRoot = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TEMP || process.env.TMPDIR || '.'), 'omz-hook-'));
@@ -536,7 +712,7 @@ function selfTest() {
       const input = c.input !== undefined ? c.input : { prompt: c.prompt, session_id: c.session ?? 'sess_selftest', cwd: tmpRoot };
       const ctx = {
         projectRoot: tmpRoot,
-        pluginRoot: c.pluginRoot ?? PLUGIN_ROOT,
+        pluginRoot: typeof c.pluginRoot === 'function' ? c.pluginRoot(tmpRoot) : c.pluginRoot ?? PLUGIN_ROOT,
         config: c.config ?? { keyword_hook: true }
       };
       let got;
@@ -544,6 +720,7 @@ function selfTest() {
       if (c.repeatOf) handleHook({ prompt: `${c.repeatOf} 第一次`, session_id: 'sess_selftest', cwd: tmpRoot }, ctx);
       try {
         got = handleHook(input, ctx);
+        if (c.derive) got = { ...got, ...c.derive(got) };
       } catch (err) {
         thrown = String(err?.message ?? err);
         got = {};

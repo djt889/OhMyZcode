@@ -1,89 +1,192 @@
-# OMZ M2 触发层：UserPromptSubmit 关键词 hook
+**English** | [简体中文](./README.zh-CN.md)
 
-`keyword-detect.mjs` 在用户提交 prompt 时扫描模式词（`ulw`/`ultrawork`/`team`/`hyperplan`，大小写不敏感），
-命中则把 `commands/<mode>.md` 正文（已剥 frontmatter）经 `additionalContext` 注入本轮上下文——等价于手打
-`/ulw`、`/team`、`/hyperplan`。设计与证据链见 `DESIGN.md` §8.2。
+# OMZ M2 trigger layer: the UserPromptSubmit keyword hook
 
-**默认关闭**（§15.5）：安装 OMZ 不得改变普通聊天行为；关键词注入属「有感知」行为，必须显式开启。
+`keyword-detect.mjs` scans the prompt when the user submits it for the mode keywords (`ulw`/`ultrawork`/`team`/
+`hyperplan`, case-insensitive). On a hit it injects the body of `commands/<mode>.md` (frontmatter already stripped)
+into the current turn's context through `additionalContext` — equivalent to typing `/ulw`, `/team` or `/hyperplan`
+by hand. Design and evidence chain: `DESIGN.md` §8.2.
 
-## 三个开关层次（哪个是真闸）
+**Off by default** (§15.5): installing OMZ must not change ordinary chat behavior; keyword injection is a
+"perceptible" behavior and must be enabled explicitly.
 
-| 层次 | 位置 | 引擎是否读取 | 作用 |
+## The three switch layers (which one is the real gate)
+
+| Layer | Location | Read by the engine? | Effect |
 |---|---|---|---|
-| 顶层 `enabled` | `hooks/hooks.json` 根对象 | **不读**，纯装饰 | 只是声明性意图，改它不改变任何运行行为 |
-| 元素级 `enabled` | `hooks.UserPromptSubmit[].hooks[].enabled` | **读**（`=== false` 即丢弃该条） | **运行层唯一真开关** |
-| `omz.keyword_hook` | 项目 `.zcode/config.json` 的 `omz` 段 / `.omz/config.json` | 脚本自己读 | 语义层真闸：非 `true` 即返回 `{}`，不读命令文件、不写状态 |
+| Top-level `enabled` | root object of `hooks/hooks.json` | **not read**, purely decorative | Declarative intent only; changing it changes no runtime behavior |
+| Element-level `enabled` | `hooks.UserPromptSubmit[].hooks[].enabled` | **read** (`=== false` discards that entry) | **The only real switch at the runtime layer** |
+| `omz.keyword_hook` | the `omz` section of the project's `.zcode/config.json` / `.omz/config.json` | read by the script itself | The real gate at the semantic layer: anything other than `true` returns `{}`, reads no command file and writes no state |
 
-引擎侧已确证：插件 hook 解析只取 `rawHooks.hooks`，**通篇不碰顶层 `enabled`**；且只要有插件贡献 hook，引擎
-就**强制**把 hook runner 置为 `enabled: true`。因此：
+Confirmed on the engine side: plugin hook parsing takes only `rawHooks.hooks` and **never touches the top-level
+`enabled` anywhere**; and as soon as any plugin contributes a hook, the engine **forces** the hook runner to
+`enabled: true`. Therefore:
 
-- **启用**：项目 `.zcode/config.json` 写 `{ "omz": { "keyword_hook": true } }`（或 `.omz/config.json` 的
-  `{ "keyword_hook": true }`），重启会话。**不需要动 `hooks.json`**。
-- **运行层彻底关掉**：在 hooks 数组**元素**里加 `"enabled": false`，或从 `.zcode-plugin/plugin.json` 移除
-  `hooks` 声明。只把顶层 `enabled` 置回 `false` 不起作用。
+- **To enable**: write `{ "omz": { "keyword_hook": true } }` in the project's `.zcode/config.json` (or
+  `{ "keyword_hook": true }` in `.omz/config.json`), then restart the session. **You do not need to touch
+  `hooks.json`.**
+- **To shut it off completely at the runtime layer**: add `"enabled": false` to the **element** inside the hooks
+  array, or remove the `hooks` declaration from `.zcode-plugin/plugin.json`. Setting the top-level `enabled` back
+  to `false` has no effect.
 
-## 启用后的固定成本：每条消息一次 node 进程
+## The fixed cost once enabled: one node process per message
 
-引擎调用 UserPromptSubmit hook runner 时**不传 matchValue/matchValues**，而匹配函数在 matchValues 为空时
-**无条件返回 true**。即 `hooks.json` 里那条大小写展开的 matcher 在本事件上**根本不参与筛选**——只要 hook
-注册着，**每条**用户消息都会启动一次 node 进程。
+When the engine calls the UserPromptSubmit hook runner it **passes no matchValue/matchValues**, and the match
+function **returns true unconditionally** when matchValues is empty. That is, the case-expanded matcher in
+`hooks.json` **plays no part in filtering at all** on this event — as long as the hook is registered, **every**
+user message starts one node process.
 
-本机实测（Windows / Node 22，5 次采样）：整条 hook **126–132ms**，裸 `node -e 0` 基线 85–91ms。命中与否、
-`keyword_hook` 开没开都一样——`disabled` 短路省的是文件读取，省不掉进程创建。所以启用 `keyword_hook` 的
-真实代价是**每条消息 +约 120ms 与一次进程创建**。
+Measured on this machine (Windows / Node 22, 5 samples): the whole hook takes **126–132ms**, against a bare
+`node -e 0` baseline of 85–91ms. It is the same whether or not there is a hit and whether or not `keyword_hook`
+is on — the `disabled` short circuit saves the file reads, not the process creation. So the real cost of enabling
+`keyword_hook` is **about +120ms and one process creation per message**.
 
-matcher 保留无害（对工具事件、`SessionStart` 仍有效，且是自文档化的意图声明），但**不要再宣称它省开销**：
-§8.2 原文「不命中连 node 进程都不启」在 `UserPromptSubmit` 上不成立。
+Keeping the matcher is harmless (it still works for tool events and `SessionStart`, and it is a self-documenting
+declaration of intent), but **do not claim it saves overhead any more**: the original wording in §8.2, "a miss
+does not even start a node process", does not hold on `UserPromptSubmit`.
 
-## 双重注入防护（§13 B5）
+## Double-injection guards (§13 B5)
 
-- prompt trim 后以 `/` 开头一律不注入（命令系统已展开过协议）。
-- 会话级去重标记：同会话同模式只注入一次。
-- §15.1 误触发红线：关键词落在行内反引号、三反引号块、引号字符串、Markdown 链接或含 `/`、`.` 的路径 token
-  内均不命中；两侧还必须不是 ASCII 字母/数字/下划线/连字符（`teamwork`、`myteam`、`multiulw` 不命中）。
+- A prompt that starts with `/` after trimming is never injected into (the command system has already expanded
+  the protocol).
+- Session-level dedupe marker: the same mode is injected only once per session.
+- The §15.1 false-trigger red line: a keyword that falls inside inline backticks, a triple-backtick block, a quoted
+  string, a Markdown link, or a path token containing `/` or `.` does not match; and neither side may be an ASCII
+  letter, digit, underscore or hyphen (`teamwork`, `myteam`, `multiulw` do not match).
 
-## 3 秒超时预算与三道自保
+## The 3-second timeout budget and three self-protections
 
-`timeoutMs: 3000` 是**引擎杀进程**：超时即零输出被终止，「任何情况都输出 `{}`」的 fail-open 契约立刻变成
-fail-broken。故脚本自扛：
+`timeoutMs: 3000` means **the engine kills the process**: on timeout it is terminated with zero output, and the
+fail-open contract "output `{}` under all circumstances" instantly becomes fail-broken. So the script carries the
+load itself:
 
-- **Markdown 链接屏蔽走线性扫描**。原正则在 `[[[[…](](](…` 上灾难性回溯（128KB 实测 18.4 秒），必被杀；
-  现由 `maskMarkdownLinks()` 单向扫描，最坏 O(n)。
-- **`MAX_SCAN = 32KB`**（头 24KB + 尾 8KB 两段独立分析）。实测最坏 32KB→8ms、256KB→177ms、1MB→2672ms，
-  32KB 对 3 秒留约 350 倍余量。两段独立屏蔽，避免头窗未闭合的三反引号跨越拼接点吃掉尾窗。
-- **`SCAN_BUDGET_MS = 1500`**：超预算即返回 `{ mode: null, reason: 'budget-exceeded' }`。宁可漏检（用户可显式
-  打 `/ulw`），不能被杀掉。
+- **Markdown link masking uses a linear scan.** The original regex catastrophically backtracked on
+  `[[[[…](](](…` (128KB measured at 18.4 seconds), and would certainly be killed; it is now a one-way scan in
+  `maskMarkdownLinks()`, worst case O(n).
+- **`MAX_SCAN = 32KB`** (the leading 24KB + the trailing 8KB, analyzed as two independent segments). Measured
+  worst cases: 32KB→8ms, 256KB→177ms, 1MB→2672ms; 32KB leaves roughly a 350x margin against 3 seconds. The two
+  segments are masked independently so that an unclosed triple backtick in the head window cannot straddle the
+  splice point and swallow the tail window.
+- **`SCAN_BUDGET_MS = 1500`**: over budget it returns `{ mode: null, reason: 'budget-exceeded' }` immediately.
+  Better to miss a detection (the user can type `/ulw` explicitly) than to be killed.
 
-## 注入长度上限
+## The injection length cap
 
-`maxOutputBytes: 65536` 是引擎侧硬截断，注入体是 `commands/<mode>.md` 全文。实测（`wc -c commands/*.md`）
-当前最大的 `ulw.md` **7200 字节**（剥 frontmatter 后正文 7044；实际 `additionalContext` 7130，整个 JSON 负载
-7355），离 64KB 尚远。但文档一旦超 64KB，输出会被切成半截 JSON → fail-broken。故 `buildAdditionalContext`
-自设 `MAX_CONTEXT_BYTES = 48KB`：超限降级为「头部原文 + 章节标题清单 + 提示显式执行 `/<mode>`」，stderr 记
-一行，stdout 仍是合法 JSON。48KB 给 JSON 转义与 banner 留了余量。
+**The engine's real wall: the default `maxOutputBytes` is 32768, and going over it makes the whole injection
+disappear silently.**
 
-## 路径与变量名纪律
+Evidence (obtained by reading this machine's `E:/APP/Zcode/resources/glm/zcode.cjs`; five sites, all 32768):
 
-- marker 路径：`projectRoot` 经 `resolveProjectRoot()` 净化（**非绝对路径不采信**，退回 `process.cwd()`），
-  再由 `assertInsideOmz()` 断言目标必须在 `<projectRoot>/.omz` 之下——与 `adapters/zcode/transport.mjs` 同一
-  纪律。此前只有 `sessionId` 侧做了安全化，`projectRoot='../../../evil'` 能把 marker 写到项目外。
-- 模板变量统一 `${ZCODE_PLUGIN_ROOT}`（与 `plugin.json` 一致）；**`ZCODE_SKILL_DIR`/`CLAUDE_SKILL_DIR` 在
-  hook 上下文会抛错**，禁用。脚本侧同时读 `ZCODE_PLUGIN_ROOT` 与 `CLAUDE_PLUGIN_ROOT`（前者优先）。
-- 入口判定用 `tools/lib/is-main.mjs` 的 `isMainModule()`（内部 `fileURLToPath`）。用 `new URL(url).pathname`
-  会因 percent-encoding 在 `C:\Program Files\`、`C:\Users\张三\` 下恒为 false，hook 静默输出 0 字节且退出码 0。
+| Evidence site | Snippet |
+|---|---|
+| Default runtime configuration | `hooks:{enabled:!1,events:{},maxOutputBytes:32768,timeoutMs:6e4}` |
+| Another fallback with the same value | `jdi={enabled:!1,events:{},maxOutputBytes:32768,timeoutMs:6e4}` |
+| The merge default constant | `AEo=32768` (taken by `L2e()` when no scope specifies one) |
+| Plugin hooks merged into the runtime config | `maxOutputBytes:e?.maxOutputBytes??32768` |
+| The runtimeRoot of workspace hooks | `maxOutputBytes:Q.hooks?.maxOutputBytes??32768` |
 
-## 会话级标记与装机实测
+**It is not 65536** — that number came from the dead top-level field in `hooks.json` that the engine never reads
+(deleted in v1.4). **And it is not "truncation" either**:
 
-标记位于 `<项目根>/.omz/.mode-injected-<sessionId>`（sessionId 已做文件名安全化，`.omz/` 已 gitignore）。
-清理 `rm -f .omz/.mode-injected-*` 后同会话可再注入。
+- Plugin / workspace hooks go through the executionPort with
+  `outputLimit:{maxBufferBytes:i.maxOutputBytes,maxInlineBytes:i.maxOutputBytes,persistOutput:"none"}`;
+  once `inlineBytes >= maxInlineBytes`, `OutputCollector.append()` **discards the remaining chunks** (it only sets a
+  `truncated` flag, which the hook path never reads), and `parseHookStdout()` then runs
+  `try{JSON.parse(r)}catch{return}` on half a JSON document — **it silently returns undefined and the entire
+  injection is dropped without a single error being raised**.
+- The other shape, `runGitCommand()`, **kills the process outright**:
+  `Buffer.byteLength(i,'utf8')>r.maxOutputBytes&&(o.kill(),l({exitCode:-1,stdout:i}))`. It serves
+  `resolveWorkspaceGitBranch` (with its own 512-byte default) and is not on the hook execution path, but it shows the
+  engine's general attitude toward exceeding `maxOutputBytes` is **kill/drop, not safe truncation**.
 
-1. `node hooks/keyword-detect.mjs --self-test` → 27/27 通过，退出码 0。
-2. `echo '{"prompt":"ulw test","session_id":"sess_x","cwd":"<项目绝对路径>"}' | node hooks/keyword-detect.mjs`
-   —— 未开 `keyword_hook` 时 stdout 恰好 `{}`（stderr 一行 `disabled`）；开了则是
-   `{"additionalContext":"<!-- OMZ keyword hook: ... -->\n\n..."}`。两种情况退出码都是 0。
-3. 开 `keyword_hook` 重启，新会话说不带斜杠的 `ulw 修一个小 bug`。判据：回答出现 ultrawork 阶段用语（目标
-   注册、双证据、评审门）且 marker 文件出现；同会话再说一次时不新增模式。
-4. 在 ZCode 日志中核对该 hook 的执行记录（触发/耗时/结果），区分超时与失败。
+Both paths are fail-broken, so the injected body must land inside the budget **before** it is written to stdout.
 
-**回退 M1**：`keyword_hook` 置 `false`（要连进程开销一起省，就在 hooks 元素里 `enabled: false`）。触发层退回
-纯 slash command，功能不受影响（§10.2 的 V3 回退即「永久 M1」）。脚本任何异常都输出 `{}` 且退出码 0（§13 B15）。
+**Our budget: `MAX_PAYLOAD_BYTES = 24576` (24KB) = 32768 − `PAYLOAD_SAFETY_MARGIN_BYTES` 8192.**
+The margin is not decoration: `maxOutputBytes` can be **lowered** by the user configuration
+(`hooks.maxOutputBytes` in `~/.zcode/cli/config.json`) or by a workspace configuration, and the hook process
+**cannot obtain that value** (the engine passes it through neither stdin nor env), so it can only be conservative
+about the default. 8KB is 25% of the default, which absorbs common tightenings such as "the user lowered it to
+24–32KB".
+
+**What is judged is the complete JSON payload on stdout, not the `additionalContext` string.** What the engine
+measures is the accumulated stdout byte count, i.e. `JSON.stringify({additionalContext})`. Measured difference:
+`additionalContext` 11105 bytes → JSON payload 11372 (+267, of which 24 bytes are the fixed envelope and the rest is
+escaping such as `\n`). The more Chinese text, quotes, backslashes and control characters, the larger the gap — so
+judging by the string alone is necessarily wrong. The single authoritative gate is
+`payloadBytes(text) <= MAX_PAYLOAD_BYTES`, and **every** return path of `buildAdditionalContextDetailed` measures it
+before returning.
+
+`MAX_CONTEXT_BYTES` is kept but re-defined: it is now `MAX_PAYLOAD_BYTES − 24` (the envelope overhead) = **24552**,
+a **soft** cap on the string side that **takes part in no decision** — the degradation logic always measures the JSON
+payload directly. It is kept for two reasons only: the existing export surface (the "injection cap" symbol readers and
+docs refer to) does not break, and it gives a rough sense of how long the string may be. It is **derived rather than
+hand-written** because JSON escaping (a single `"`, `\` or control character expands 1→6 bytes) means string length has
+no fixed relation to payload size, so any hand-written string cap can silently drift above the engine's real wall the
+way the old 48KB did (49152 > the engine's 32768). Being derived, it is always
+`< MAX_PAYLOAD_BYTES < ENGINE_DEFAULT_MAX_OUTPUT_BYTES`, and that invariant is pinned by a test.
+
+**Two degradation levels (both governed by the payload budget; the head window size is found by binary search on
+measured payloads, not estimated from string lengths)**:
+
+| Level | Trigger | Content |
+|---|---|---|
+| `full` | The whole-text payload is ≤ the budget | The source-comment line + the full command body |
+| `headings` | The whole text is over budget, but "head + heading list + notice" fits | The leading original text (the largest byte count that fits, by binary search) + the list of all Markdown section headings + a notice to run `/<mode>` explicitly |
+| `minimal` | Even the heading list blows the budget (e.g. several thousand `## ` lines) | The leading original text + one line: "the content is too long, run `/<mode>` explicitly" |
+
+`minimal` additionally ends with a `fitToPayload()` binary-search hard trim, so **there is no return path that has
+"degraded but is still over the limit"** — `tests/hooks.test.mjs` asserts this by sweeping eight pathological budgets
+(24/32/64/128/512/2048/8192/24576). On degradation one line goes to stderr: the original body byte count, the original
+JSON payload, the budget, which level it dropped to, the post-degradation payload, and the engine default. stdout
+always stays valid JSON under the strict schema.
+
+**Currently measured (this round actually ran `buildAdditionalContextDetailed`; not copied from older figures)**:
+
+| File | File bytes | Body after stripping frontmatter | `additionalContext` | **JSON payload** | Level | Margin vs budget | Margin vs engine default |
+|---|---|---|---|---|---|---|---|
+| `ulw.md` | 11175 | 11018 | 11105 | **11372** | `full` | **2.16x** | 2.88x |
+| `team.md` | 4442 | 4315 | 4405 | **4475** | `full` | 5.49x | 7.32x |
+| `hyperplan.md` | 1067 | 934 | 1039 | **1083** | `full` | 22.69x | 30.26x |
+
+`ulw.md` is the tightest one: it grew from 7200 to 11175 (+55%) when it was split into eight steps and gained step
+zero in 1.3.0/1.4.0, and that 2.16x margin will keep being eaten. So `tests/hooks.test.mjs` carries a regression
+sentinel asserting its payload is below the budget **and that the margin stays above 1.5x** — further growth of
+`ulw.md` hits that test first, not the engine.
+(The body is 11018 rather than the 11019 this document used to record: after stripping the delimiters,
+`stripFrontmatter` also applies `replace(/^\s+/,'')`, which eats one leading newline.)
+
+
+## Path and variable-name discipline
+
+- Marker path: `projectRoot` is sanitized by `resolveProjectRoot()` (**a non-absolute path is never trusted**, it
+  falls back to `process.cwd()`), then `assertInsideOmz()` asserts the target must be under `<projectRoot>/.omz` —
+  the same discipline as in `adapters/zcode/transport.mjs`. Previously only the `sessionId` side was sanitized, and
+  `projectRoot='../../../evil'` could write the marker outside the project.
+- Template variables are uniformly `${ZCODE_PLUGIN_ROOT}` (consistent with `plugin.json`); **`ZCODE_SKILL_DIR`/
+  `CLAUDE_SKILL_DIR` throw in a hook context** and are forbidden. The script reads both `ZCODE_PLUGIN_ROOT` and
+  `CLAUDE_PLUGIN_ROOT` (the former takes precedence).
+- Entry-point detection uses `isMainModule()` from `tools/lib/is-main.mjs` (internally `fileURLToPath`). Using
+  `new URL(url).pathname` is always false under `C:\Program Files\` or `C:\Users\张三\` because of
+  percent-encoding, and the hook then silently outputs 0 bytes with exit code 0.
+
+## The session-level marker and installed-environment acceptance
+
+The marker lives at `<project root>/.omz/.mode-injected-<sessionId>` (the sessionId is already made
+filename-safe; `.omz/` is already gitignored). After `rm -f .omz/.mode-injected-*` the same session can be
+injected into again.
+
+1. `node hooks/keyword-detect.mjs --self-test` → 30/30 pass, exit code 0 (three of them cover the payload budget:
+   real `ulw.md` stays at `full`, an oversized command file degrades to `headings`, and thousands of headings degrade
+   to `minimal` — each asserting the JSON payload is still inside the budget).
+2. `echo '{"prompt":"ulw test","session_id":"sess_x","cwd":"<absolute path of the project>"}' | node hooks/keyword-detect.mjs`
+   — with `keyword_hook` off, stdout is exactly `{}` (with one `disabled` line on stderr); with it on, the output is
+   `{"additionalContext":"<!-- OMZ keyword hook: ... -->\n\n..."}`. In both cases the exit code is 0.
+3. Turn `keyword_hook` on, restart, and in a new session say `ulw 修一个小 bug` without a slash. Criteria: the reply
+   contains ultrawork phase vocabulary (goal registration, dual evidence, review gate) and the marker file appears;
+   saying it again in the same session adds no new mode.
+4. Check the hook's execution record (trigger / duration / result) in the ZCode logs, distinguishing a timeout from
+   a failure.
+
+**Fall back to M1**: set `keyword_hook` to `false` (to also save the process overhead, put `enabled: false` in the
+hooks element). The trigger layer falls back to pure slash commands with no loss of function (the V3 fallback in
+§10.2 is exactly "permanent M1"). Any exception in the script still outputs `{}` with exit code 0 (§13 B15).

@@ -1,93 +1,98 @@
+**English** | [简体中文](./README.zh-CN.md)
+
 # OMZ (Oh My ZCode)
 
-对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.md](./DESIGN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.md](./CHANGELOG.md)（当前 1.5.0）。
+> **License boundary**: This repository is distributed under MIT (`LICENSE` contains only the full MIT text of this project itself). The upstream project [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) is under the **Sustainable Use License 1.0** (not an OSI license; it limits use to your own internal business purposes or to non-commercial/personal use). That license has been verified and is recorded, together with a verbatim overlap analysis, in `upstream/omo-sources.lock.json`: against the 15,824 8-grams of the four upstream `SKILL.md` files, only 9 8-grams are shared, and all 9 come from one and the same JSON enum line. How the boundary between the two licenses is to be judged is the project owner's decision; `upstream/` only records evidence.
 
-## 定位
+A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.5.0).
 
-让 ZCode 上的项目做得更好：并行吞吐（更快）、角色专业分工（更深）、独立评审与双证据（更可靠）、访谈式规划（更准）四类能力并重。
+## Purpose
 
-## 安装（core profile，默认）
+Make projects on ZCode turn out better, weighting four classes of capability equally: parallel throughput (faster), specialized division of roles (deeper), independent review plus dual evidence (more reliable), and interview-driven planning (more accurate).
 
-1. 将整个 `omz/` 目录作为 ZCode 插件放置（含 `.zcode-plugin/plugin.json`）。清单声明 `agents` / `commands` / `skills` / `hooks`（`hooks/hooks.json`；hook 本身注册即启用，是否真的注入由语义闸 `omz.keyword_hook` 决定，**默认关闭**，见下）与一个默认关闭的 `mcpServers.omz-coordinator`；路径变量统一用 `${ZCODE_PLUGIN_ROOT}` 与 `${ZCODE_PROJECT_DIR}`。
-2. **重启会话 / 新开会话**——agent 清单是会话启动时的快照（DESIGN §13 B19），不重启则子代理不可见。
-3. `/omz-doctor` 自检：应显示 9 个 omz agent 全部可 spawn、frontmatter/model 校验通过、`.omz/` 已在 `.gitignore`。离线等价物是 `npm run doctor`——注意它只做静态校验，spawn ping 必须在会话内跑（DESIGN §10.1 V12，该项已在 v1.5 装机验收中结清：真实会话内 9/9 返回暗语）。
-4. 冒烟：`/ulw 一个跨 2 文件的小特性`。
+## Installation (core profile, the default)
 
-需要 **Node >= 22.13**（coordinator 与 dashboard 用内置 `node:sqlite`，零原生依赖）。这个下限不是保守取整：22.5–22.12 上 `node:sqlite` 在 `--experimental-sqlite` flag 之后，直接 import 会 `ERR_UNKNOWN_BUILTIN_MODULE` **崩栈退出**（实测：coordinator 与 dashboard 立即挂，只有 core 能用），22.13.0 起才默认可用。全仓库零第三方运行时依赖。
+1. Place the whole `omz/` directory as a ZCode plugin (it contains `.zcode-plugin/plugin.json`). The manifest declares `agents` / `commands` / `skills` / `hooks` (`hooks/hooks.json`; a hook is enabled as soon as it is registered, while whether it actually injects is decided by the semantic gate `omz.keyword_hook`, which is **off by default**, see below) plus one `mcpServers.omz-coordinator` that is disabled by default; path variables uniformly use `${ZCODE_PLUGIN_ROOT}` and `${ZCODE_PROJECT_DIR}`.
+2. **Restart the session / open a new session** — the agent manifest is a snapshot taken at session start (DESIGN §13 B19); without a restart the subagents are invisible.
+3. `/omz-doctor` self-check: it should show that all 9 omz agents can be spawned, that frontmatter/model validation passes, and that `.omz/` is already in `.gitignore`. The offline equivalent is `npm run doctor` — note that it only performs static validation; the spawn ping must be run inside a session (DESIGN §10.1 V12, an item already closed out in the v1.5 installed-environment acceptance: inside a real session, 9/9 returned the passphrase).
+4. Smoke test: `/ulw a small feature spanning 2 files`.
 
-`package.json` 标了 `private: true`：OMZ **仅作 ZCode 插件分发（git clone / 插件目录放置），不发布到 npm**。该字段只阻止 `npm publish`，不影响 git 发布与插件装载。
+Requires **Node >= 22.13** (the coordinator and the dashboard use the built-in `node:sqlite`, zero native dependencies). This lower bound is not conservative rounding: on 22.5–22.12, `node:sqlite` sits behind the `--experimental-sqlite` flag, and importing it directly **crashes with a stack trace and exits** on `ERR_UNKNOWN_BUILTIN_MODULE` (empirically verified: the coordinator and the dashboard die immediately, only core is usable); it is available by default only from 22.13.0 on. The whole repository has zero third-party runtime dependencies.
 
-**安装 OMZ 不改变 ZCode 默认聊天行为。** 这是产品承诺（DESIGN §15），不是"通常如此"：
+`package.json` is marked `private: true`: OMZ is **distributed only as a ZCode plugin (git clone / placement in the plugin directory) and is not published to npm**. That field only blocks `npm publish`; it does not affect git-based distribution or plugin loading.
 
-- 普通问答、读代码、单文件 quick 小改一律由主 agent 直接处理，不 spawn 子代理、不写 `.omz/`、不建 team、不连 CodeGraph。
-- 只有显式输入 `/ulw`、`/team`、`/hyperplan` 才进入对应模式。
-- 关键词 hook 与 `graph`/`orchestration`/`dashboard` 三个 profile **默认全部关闭**，必须显式启用。
-- 可选层失败只降级该层能力，普通聊天不受影响；卸载 OMZ 不修改用户原有 agents/skills/MCP 配置。
-- 唯一固定成本是 9 条 agent description 进入发现上下文的少量 token。
+**Installing OMZ does not change ZCode's default chat behavior.** This is a product promise (DESIGN §15), not a "usually the case":
 
-## 命令
+- Ordinary Q&A, code reading, and single-file quick edits are always handled directly by the main agent: no subagent spawn, no writes to `.omz/`, no team creation, no CodeGraph connection.
+- Only explicitly typing `/ulw`, `/team`, or `/hyperplan` enters the corresponding mode.
+- The keyword hook and the three profiles `graph`/`orchestration`/`dashboard` are **all off by default** and must be enabled explicitly.
+- A failure in an optional layer only degrades that layer's capability; ordinary chat is unaffected. Uninstalling OMZ does not modify the user's pre-existing agents/skills/MCP configuration.
+- The only fixed cost is the small number of tokens that the 9 agent descriptions add to the discovery context.
 
-| 命令 | 作用 |
+## Commands
+
+| Command | What it does |
 |---|---|
-| `/ulw <目标>` | ultrawork 八步生命周期：激活 → 目标注册 → 技能盘点 → 确定性保障 → 规划门槛 → 执行 → 双证据验证 → 评审门与提交（+ 10 条 Hard rules） |
-| `/team <目标>` | Team Mode 七步协议：多 worker 并行编排（coordinator MCP 或 core 波次并行回退） |
-| `/hyperplan` | 纯规划：omz-planner 访谈 → omz-critic 差距分析 → 批准门（不执行） |
-| `/omz-status` | 状态看板（渲染 `.omz/` 波次×任务×状态，40 行上限）；以 `tools/render-status.mjs` 输出为准 |
-| `/omz-doctor` | 会话内自检：spawn ping × 9、model 校验、gitignore、mtime（B19）、BOM 扫描（B4） |
+| `/ulw <goal>` | The eight-step ultrawork lifecycle: activation → goal registration → skill inventory → certainty safeguards → planning threshold → execution → dual-evidence verification → review gate and commit (+ 10 Hard rules) |
+| `/team <goal>` | The seven-step Team Mode protocol: parallel orchestration of multiple workers (coordinator MCP, or the core wave-parallel fallback) |
+| `/hyperplan` | Pure planning: omz-planner interview → omz-critic gap analysis → approval gate (no execution) |
+| `/omz-status` | Status board (renders `.omz/` as wave × task × status, capped at 40 lines); the output of `tools/render-status.mjs` is authoritative |
+| `/omz-doctor` | In-session self-check: spawn ping × 9, model validation, gitignore, mtime (B19), BOM scan (B4) |
 
-## 子代理（9 + 内置 Explore）
+## Subagents (9 + the built-in Explore)
 
-子代理**结构性没有 Agent 工具**（DESIGN §10.1 V5 实测），任何角色都不能再 spawn；也没有独立 `Grep`/`Glob`，文件搜索走 Bash（B20）。
+Subagents **structurally have no Agent tool** (DESIGN §10.1 V5, empirically verified), so no role can spawn further; they also have no standalone `Grep`/`Glob`, and file search goes through Bash (B20).
 
-| subagent_type | 职责 | 工具面 |
+| subagent_type | Responsibility | Tool surface |
 |---|---|---|
-| `omz-planner` | 访谈式战略规划（Prometheus） | `[Read, Bash, Write]` |
-| `omz-critic` | 计划差距分析（Metis） | `[Read, Bash]` |
-| `omz-deep` | 深度自主编码（Hephaestus） | 全工具，maxTurns 护栏 |
-| `omz-junior` | 单任务执行器（Sisyphus-Junior） | 全工具，禁止再委派（结构性） |
-| `omz-atlas` | 波次状态机 + 派单建议生成器 + 汇报器（Atlas）：自己不 spawn 不实现，产出 8 要素派单建议回请主 agent | 全工具 |
-| `omz-oracle` | 架构咨询/疑难调试（Oracle） | `[Read, Bash]` |
-| `omz-reviewer` | 对抗性评审门（Momus） | `[Read, Bash]` |
-| `omz-librarian` | 文档/API 检索（Librarian）：无搜索引擎工具，按已知 URL 抓全文 | `[Read, Bash, WebFetch]` |
-| `omz-looker` | 多模态视觉验收：Bash 用于枚举图片路径 | `[Read, Bash]` |
-| `explore`（内置复用） | 快速扫库 | 引擎内置 |
+| `omz-planner` | Interview-driven strategic planning (Prometheus) | `[Read, Bash, Write]` |
+| `omz-critic` | Plan gap analysis (Metis) | `[Read, Bash]` |
+| `omz-deep` | Deep autonomous coding (Hephaestus) | All tools, maxTurns guardrail |
+| `omz-junior` | Single-task executor (Sisyphus-Junior) | All tools, further delegation forbidden (structurally) |
+| `omz-atlas` | Wave state machine + dispatch-proposal generator + reporter (Atlas): does not spawn and does not implement itself; produces 8-element dispatch proposals and hands them back to the main agent | All tools |
+| `omz-oracle` | Architecture consulting / hard debugging (Oracle) | `[Read, Bash]` |
+| `omz-reviewer` | Adversarial review gate (Momus) | `[Read, Bash]` |
+| `omz-librarian` | Docs/API retrieval (Librarian): no search-engine tool, fetches full text from known URLs | `[Read, Bash, WebFetch]` |
+| `omz-looker` | Multimodal visual acceptance: Bash is used to enumerate image paths | `[Read, Bash]` |
+| `explore` (built-in, reused) | Fast repository scan | Engine built-in |
 
-只读角色（critic/oracle/reviewer/librarian/looker）的白名单拦得住 `Edit`/`Write`，**拦不住 Bash 写文件**——各自正文逐条列出禁用命令并声明这一条靠自律守。
+For the read-only roles (critic/oracle/reviewer/librarian/looker), the whitelist does block `Edit`/`Write`, but it **does not block writing files through Bash** — each role's body lists the forbidden commands one by one and states that this particular constraint is held by self-discipline.
 
-## 可选 profile（默认全部关闭）
+## Optional profiles (all off by default)
 
-| Profile | 状态 | 启用 | 回退 |
+| Profile | Status | Enable | Fallback |
 |---|---|---|---|
-| `graph` | 需外部安装 | 安装 `@colbymchenry/codegraph`（MIT）+ 目标项目 `codegraph init` | Explore + Bash grep/rg |
-| `orchestration` | ✅ 已实现（`mcp/coordinator/`） | `plugin.json` 的 `mcpServers.omz-coordinator.enabled` → `true` | core 波次并行 + `.omz/runtime/` 文件状态 |
-| `dashboard` | ✅ 已实现（`dashboard/`） | 项目 `.zcode/config.json` → `{"omz":{"dashboard":{"enabled":true}}}` | ZCode GUI 任务面板 + `/omz-status` |
-| M2 关键词 hook | ✅ 已实现（`hooks/`） | 见下 | slash commands（M1，零风险） |
+| `graph` | Requires external installation | Install `@colbymchenry/codegraph` (MIT) + `codegraph init` in the target project | Explore + Bash grep/rg |
+| `orchestration` | ✅ Implemented (`mcp/coordinator/`) | `mcpServers.omz-coordinator.enabled` in `plugin.json` → `true` | core wave parallelism + `.omz/runtime/` file state |
+| `dashboard` | ✅ Implemented (`dashboard/`) | Project `.zcode/config.json` → `{"omz":{"dashboard":{"enabled":true}}}` | ZCode GUI task panel + `/omz-status` |
+| M2 keyword hook | ✅ Implemented (`hooks/`) | See below | slash commands (M1, zero risk) |
 
-- **coordinator**：stdio MCP sidecar，13 个工具，SQLite WAL 是任务/依赖/租约/mailbox 的唯一事实源。`now` 不在任何工具的 `inputSchema` 里（调度器时钟由服务端独占）；claim 走 `BEGIN IMMEDIATE`，`max_parallel` 在同事务内生效；`complete`/`fail` 有终态守卫 + 依赖边一次性消费双层防重。细节见 [mcp/coordinator/README.md](./mcp/coordinator/README.md)。
-- **dashboard**：只读展示层，所有端点都是 GET（其它方法 405），无任何写入/命令通道。只绑 loopback、随机端口、每次启动随机 token；数据端点必须 token，静态壳与 `/healthz` 免 token（浏览器子资源不带 token）。细节见 [dashboard/README.md](./dashboard/README.md)。
-- **关键词 hook 的开关（只有一道需要你动）**：① **运行层**是 hooks 数组的**元素级** `enabled`（`hooks.UserPromptSubmit[].hooks[].enabled`）——引擎只读这一处（`=== false` 即丢弃该条）。OMZ **有意留空**（留空即启用），所以运行层默认是通的，你**不需要**改 `hooks.json`。② **语义层（真闸，按项目粒度）**：项目 `.zcode/config.json` 的 `omz.keyword_hook` 或 `.omz/config.json` 的 `keyword_hook` → `true`。脚本在此关闭时立即返回 `{}`，不读任何文件。所以**启用只需写项目配置并重启会话**；要连每条消息约 120ms 的空跑成本一起省掉，才在 hooks 元素里加 `"enabled": false`。注意 `hooks.json` **顶层没有 `enabled` 字段**（v1.4 已删除）：引擎的 `parsePluginHookEvents` 只取 `hooks` 字段，且只要有插件贡献 hook 就**强制** `enabled: true`——顶层写什么都没有运行时效果，留着只会让人以为"改成 true 就启用了"。细节见 [hooks/README.md](./hooks/README.md) 的三层开关表。
+- **coordinator**: an stdio MCP sidecar with 13 tools; SQLite WAL is the single source of truth for tasks/dependencies/leases/mailbox. `now` is not in any tool's `inputSchema` (the scheduler clock is owned exclusively by the server side); claim goes through `BEGIN IMMEDIATE`, and `max_parallel` takes effect inside the same transaction; `complete`/`fail` have a terminal-state guard plus one-time consumption of dependency edges as two layers of duplicate protection. Details in [mcp/coordinator/README.md](./mcp/coordinator/README.md).
+- **dashboard**: a read-only presentation layer where every endpoint is GET (any other method gets 405), with no write or command channel whatsoever. It binds loopback only, uses a random port, and mints a random token at every start; data endpoints require the token, while the static shell and `/healthz` are token-free (browser subresources do not carry the token). Details in [dashboard/README.md](./dashboard/README.md).
+- **The switches of the keyword hook (only one of them needs any action from you)**: ① The **runtime layer** is the **element-level** `enabled` in the hooks array (`hooks.UserPromptSubmit[].hooks[].enabled`) — the engine reads only this one place (`=== false` discards that entry). OMZ **deliberately leaves it unset** (unset means enabled), so the runtime layer is open by default and you do **not** need to edit `hooks.json`. ② The **semantic layer (the real gate, at project granularity)**: `omz.keyword_hook` in the project's `.zcode/config.json`, or `keyword_hook` in `.omz/config.json` → `true`. While this is off, the script returns `{}` immediately and reads no files at all. So **enabling it only requires writing the project config and restarting the session**; only if you also want to save the roughly 120 ms of no-op cost on every message do you add `"enabled": false` to the hooks element. Note that `hooks.json` **has no top-level `enabled` field** (removed in v1.4): the engine's `parsePluginHookEvents` reads only the `hooks` field, and as soon as any plugin contributes a hook it **forces** `enabled: true` — whatever is written at the top level has no runtime effect, and keeping it would only make people believe that "flipping it to true enables the hook". Details in the three-layer switch table in [hooks/README.md](./hooks/README.md).
 
-每层可单独关闭，失败只降级对应增强，不影响 core。
+Each layer can be turned off individually; a failure only degrades the corresponding enhancement and does not affect core.
 
-## 开发与测试
+## Development and testing
 
 ```bash
-npm test                  # 全部测试：548 用例 / 99 suites（等价 node --test tests/）
-node --test tests/        # 同上；单文件如 node --test tests/protocol.test.mjs
-npm run test:protocol     # 分文件脚本（9 个）：path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
-                          # capability 与 cli 无独立脚本，用 node --test tests/<file> 单跑
-npm run validate          # frontmatter 规范校验（tools/validate-frontmatter.mjs .）
-npm run doctor            # 离线环境自检（当前仓库状态下 exit 0）
-npm run doctor:supply-chain  # 供应链取证；**在默认环境下预期 exit 1**——未启用 graph profile 时"取不到
-                          # codegraph 版本"就是事实（supply:codegraph 判 FAIL），上游 commit 未 pin 另有 WARN。
-                          # 它是发布前的取证工具，不是 CI 门，别接进流水线当红绿灯。
-npm run status            # 渲染 .omz/ 状态（/omz-status 的执行体）
-npm run hook:self-test    # 关键词 hook 自检（27/27）
-npm run sync:check        # 上游 lock 字段与 omz_target 存在性
-npm run coordinator       # 手工起 coordinator（stdio JSON-RPC）
-npm run dashboard         # 纯 HTTP dashboard；npm run dashboard:electron 起 Electron 壳
+npm test                  # All tests: 572 cases / 102 suites (equivalent to node --test tests/)
+node --test tests/        # Same as above; a single file, e.g. node --test tests/protocol.test.mjs
+npm run test:protocol     # Per-file scripts (9): path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
+                          # capability and cli have no dedicated script; run them one by one with node --test tests/<file>
+npm run validate          # frontmatter conformance check (tools/validate-frontmatter.mjs .)
+npm run doctor            # Offline environment self-check (exit 0 in the current repository state)
+npm run doctor:supply-chain  # Supply-chain evidence; **expected to exit 1 in the default environment** — when the graph
+                          # profile is not enabled, "the codegraph version cannot be obtained" is simply the fact
+                          # (supply:codegraph is judged FAIL), and the unpinned upstream commit gives a separate WARN.
+                          # It is a pre-release evidence tool, not a CI gate; do not wire it into a pipeline as a red/green light.
+npm run status            # Render .omz/ status (the executable body behind /omz-status)
+npm run hook:self-test    # Keyword hook self-check (30/30)
+npm run sync:check        # Upstream lock fields and omz_target existence
+npm run coordinator       # Start the coordinator by hand (stdio JSON-RPC)
+npm run dashboard         # Pure HTTP dashboard; npm run dashboard:electron starts the Electron shell
 ```
 
-## 仓库纪律
+## Repository discipline
 
-上游 OmO 同步走 DESIGN §16 的选择性同步流程：不整仓 fork、不直接 `merge upstream/dev`；来源锁定在 `upstream/omo-sources.lock.json`，同步流程与不适用路径见 [upstream/README.md](./upstream/README.md)。归属与第三方来源声明见 [NOTICE](./NOTICE)（`LICENSE` 只含本项目自身的 MIT 全文）。
+Upstream OmO sync follows the selective sync process of DESIGN §16: no whole-repository fork, no direct `merge upstream/dev`; sources are pinned in `upstream/omo-sources.lock.json`, and the sync process together with the non-applicable paths is described in [upstream/README.md](./upstream/README.md). Attribution and third-party source declarations are in [NOTICE](./NOTICE) (`LICENSE` contains only the full MIT text of this project itself).

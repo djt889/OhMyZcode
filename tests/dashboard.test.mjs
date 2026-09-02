@@ -11,8 +11,13 @@
  *   3. 随机 token    → 同上例断言 token.length >= 32；+ describe('checkToken / safeEqual / authResult') 5 例
  *                      + 真实 HTTP 的 401/403/200 三例
  *   4. CORS 白名单   → describe('checkOrigin / originsFor') 3 例 + it('外部 Origin 的请求返回 403')
- *                      ⚠️ **缺口**：server.mjs 第 4 条还含 checkRequestTarget() 的 absolute-form→400 分支
- *                      （请求流水线 ①bis），本文件**没有**对应用例。这里如实记着，不当已覆盖论。
+ *                      ①bis 请求行目标（checkRequestTarget 的 absolute-form→400 分支）**已覆盖**，两级：
+ *                      · 纯函数 → describe('checkRequestTarget（请求行目标 request-target 白名单）') 5 例
+ *                        （origin-form 放行 / absolute-form 本机白名单放行 / absolute-form 外部 host 拒 /
+ *                         authority-form 与 asterisk 拒 / 非 http scheme 拒）
+ *                      · 真实 socket → describe('请求流水线：请求行目标白名单（I5-4 ①bis）') 4 例，
+ *                        用 net.connect 手写请求行（node:http 客户端只发 origin-form，构造不出
+ *                        absolute-form）：外部 host→400、本机 host→200、origin-form→200、ftp scheme→400
  *   5. SSE 结构化    → describe('sseEncode') 6 例 + describe('SSE 真实连接') 断言 event: snapshot 且 data 可 JSON.parse
  *   6. CSP           → it('安全头齐全：CSP default-src none + script-src self…') + it('404 与 405 响应同样带全套安全头')
  *   7. 只读          → it('POST 请求返回 405 且带 Allow: GET（只读契约）') + it('DELETE / PUT 同样返回 405')
@@ -31,6 +36,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +50,7 @@ import {
   STATIC_FILES,
   authResult,
   checkOrigin,
+  checkRequestTarget,
   checkToken,
   collectSnapshot,
   createServer,
@@ -130,6 +137,47 @@ function request(urlStr, method, { headers = {} } = {}) {
   });
 }
 
+/**
+ * 手写原始请求行的最小客户端。**必须绕开 node:http 的高层 API**：http.get/http.request
+ * 永远发 origin-form（`GET /path`），无法构造 absolute-form（`GET http://host/path`）
+ * 或 authority-form（`GET host:443`）——那正是 checkRequestTarget() 要防的形态。
+ * 因此这里用 net.connect 直接写字节。返回首行状态码与整段原文。
+ */
+function rawRequest(port, requestLine, { timeoutMs = 4000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sock.destroy();
+      const first = raw.split('\r\n')[0] ?? '';
+      const m = /^HTTP\/1\.[01] (\d{3})/.exec(first);
+      resolve({ status: m ? Number(m[1]) : null, statusLine: first, raw });
+    };
+    const sock = net.connect(port, '127.0.0.1', () => sock.write(requestLine));
+    const timer = setTimeout(done, timeoutMs);
+    sock.setEncoding('utf8');
+    sock.on('data', (c) => {
+      raw += c;
+    });
+    sock.on('end', done);
+    sock.on('close', done);
+    sock.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+/** 组装一条完整请求：request-target 由调用方给出（可为任意 form），Host 恒指向本服务。 */
+function requestLineFor(target, port) {
+  return `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`;
+}
+
 describe('isLoopbackRequest', () => {
   it('127.0.0.1 与 127.0.0.0/8 内的地址判为 loopback', () => {
     assert.equal(isLoopbackRequest(fakeReq({ remoteAddress: '127.0.0.1' })), true);
@@ -208,6 +256,50 @@ describe('checkOrigin / originsFor', () => {
     const allowed = originsFor(1234);
     assert.equal(checkOrigin(fakeReq({ headers: { origin: 'http://evil.example' } }), allowed), false);
     assert.equal(checkOrigin(fakeReq({ headers: { origin: 'http://127.0.0.1:9999' } }), allowed), false);
+  });
+});
+
+/**
+ * checkRequestTarget()（请求流水线 ①bis / I5 第 4 条的后半）。
+ * 这道门此前是**有实现零断言**的唯一一项：全仓搜 checkRequestTarget 只命中 server.mjs 自身，
+ * 删掉整个函数体改成 `return true` 也不会有任何用例变红。这里补上两级断言：
+ *   · 纯函数级（本 describe）：直接调用，覆盖四种 request-target form 与非 http scheme；
+ *   · 真实 HTTP 级（describe('请求流水线：请求行目标白名单（I5-4 ①bis）')）：用 net.connect
+ *     手写原始请求行，证明这道门在真实流水线里生效，不只是个孤立的纯函数。
+ * checkRequestTarget 实际只读 req.url（Node 把请求行的 request-target 原样放在这里），
+ * 因此假 req 只需 { url }；仍走 fakeReq 以保持与其它用例一致的形态。
+ */
+describe('checkRequestTarget（请求行目标 request-target 白名单）', () => {
+  it('origin-form（GET /api/snapshot）恒放行，与端口无关', () => {
+    assert.equal(checkRequestTarget(fakeReq({ url: '/api/snapshot' }), 1234), true);
+    assert.equal(checkRequestTarget(fakeReq({ url: '/api/snapshot?token=x' }), 9999), true);
+    assert.equal(checkRequestTarget(fakeReq({ url: '/' }), 1234), true);
+    // url 缺失时按 '/' 处理（不因缺字段把请求判成非法）
+    assert.equal(checkRequestTarget({ headers: {} }, 1234), true);
+  });
+
+  it('absolute-form 指向本机白名单 host 放行（127.0.0.1 与 localhost 两个 origin）', () => {
+    assert.equal(checkRequestTarget(fakeReq({ url: 'http://127.0.0.1:1234/app.js' }), 1234), true);
+    assert.equal(checkRequestTarget(fakeReq({ url: 'http://localhost:1234/app.js' }), 1234), true);
+  });
+
+  it('absolute-form 指向外部 host 拒绝（http://evil.example/app.js）', () => {
+    assert.equal(checkRequestTarget(fakeReq({ url: 'http://evil.example/app.js' }), 1234), false);
+    // 同一白名单口径：host 对但端口不对也拒绝（否则「精确白名单」名不副实）
+    assert.equal(checkRequestTarget(fakeReq({ url: 'http://127.0.0.1:9999/app.js' }), 1234), false);
+  });
+
+  it('authority-form（GET evil.example:443）拒绝', () => {
+    assert.equal(checkRequestTarget(fakeReq({ url: 'evil.example:443' }), 1234), false);
+    // asterisk-form 同样不受支持
+    assert.equal(checkRequestTarget(fakeReq({ url: '*' }), 1234), false);
+  });
+
+  it('非 http scheme 一律拒绝（ftp:// / https:// / file://，即便 host 在白名单里）', () => {
+    assert.equal(checkRequestTarget(fakeReq({ url: 'ftp://127.0.0.1:1234/app.js' }), 1234), false);
+    // https 也拒绝：本服务只跑明文 loopback http，白名单里没有 https origin
+    assert.equal(checkRequestTarget(fakeReq({ url: 'https://127.0.0.1:1234/app.js' }), 1234), false);
+    assert.equal(checkRequestTarget(fakeReq({ url: 'file:///etc/passwd' }), 1234), false);
   });
 });
 
@@ -532,6 +624,47 @@ describe('请求流水线：loopback 门（I5-1）', () => {
       socket: { remoteAddress: undefined, destroy: () => {} }
     });
     assert.equal(rec.status, 403);
+  });
+});
+
+/**
+ * 请求流水线 ①bis：请求行目标白名单在**真实 socket** 上生效。
+ * 上面的 describe('checkRequestTarget…') 只证明纯函数判对，不证明它接在流水线里；
+ * 这组用 net.connect 手写请求行（node:http 客户端做不到，见 rawRequest 注释），
+ * 覆盖「外部 host 被 400 挡下」与「本机 host 正常放行」这一对——只测前者的话，
+ * 把实现改成 `return false` 也能全绿，白名单就成了全拒。
+ */
+describe('请求流水线：请求行目标白名单（I5-4 ①bis）', () => {
+  it('absolute-form 指向外部 host 时真实响应 400（GET http://evil.example/app.js）', async (t) => {
+    const { port } = await startServer(t, { projectRoot: makeRoot(), token: NO_TOKEN });
+    const res = await rawRequest(port, requestLineFor('http://evil.example/app.js', port));
+    assert.equal(res.status, 400, `外部 host 的 absolute-form 应 400，实际状态行：${res.statusLine}`);
+    assert.match(res.raw, /unsupported request-target/);
+    // 400 是在读静态文件之前发生的：响应体里不得出现 app.js 的内容
+    assert.equal(res.raw.includes('createTextNode'), false, '被拒的请求不得回传静态资源内容');
+  });
+
+  it('absolute-form 指向本服务自身 host:port 时放行（不是所有 absolute-form 都被拒）', async (t) => {
+    const { port } = await startServer(t, { projectRoot: makeRoot(), token: NO_TOKEN });
+    for (const host of ['127.0.0.1', 'localhost']) {
+      const res = await rawRequest(port, requestLineFor(`http://${host}:${port}/healthz`, port));
+      assert.notEqual(res.status, 400, `${host} 的 absolute-form 不应 400（状态行：${res.statusLine}）`);
+      assert.equal(res.status, 200, `${host} 的 absolute-form 应 200（状态行：${res.statusLine}）`);
+      assert.match(res.raw, /"ok":true/);
+    }
+  });
+
+  it('origin-form 在同一条原始通道上仍然正常（证明 400 来自 request-target 判定，不是原始写法本身出错）', async (t) => {
+    const { port } = await startServer(t, { projectRoot: makeRoot(), token: NO_TOKEN });
+    const res = await rawRequest(port, requestLineFor('/healthz', port));
+    assert.equal(res.status, 200, `origin-form 应 200，实际状态行：${res.statusLine}`);
+  });
+
+  it('非 http scheme 的 absolute-form 真实响应 400（ftp:// 指向本机也拒）', async (t) => {
+    const { port } = await startServer(t, { projectRoot: makeRoot(), token: NO_TOKEN });
+    const res = await rawRequest(port, requestLineFor(`ftp://127.0.0.1:${port}/healthz`, port));
+    assert.equal(res.status, 400, `ftp scheme 应 400，实际状态行：${res.statusLine}`);
+    assert.match(res.raw, /unsupported request-target/);
   });
 });
 

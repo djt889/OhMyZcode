@@ -331,8 +331,22 @@ describe('sync-omo-skills.mjs CLI 层', () => {
 
 /**
  * doctor.mjs --supply-chain（I6 供应链取证）。
- * 本仓库当前状态下 upstream 许可证未核验、codegraph 未安装，因此 exit 1 是**预期**行为——
- * 断言的是「取证项都在且每个 FAIL 都带可执行修复指令」，不是「必须全绿」。
+ *
+ * 当前状态：upstream 许可证**已核验**（upstream/omo-sources.lock.json 的 license.omo 四项判据齐备：
+ * status=verified / spdx=LicenseRef-SUL-1.0 / verified_at / verified_via，判据实现见
+ * tools/lib/license-gate.mjs），supply:upstream-license 是 OK。所以本机 exit 1 的**唯一**来源是
+ * supply:codegraph——codegraph 未安装、取不到版本号。
+ *
+ * 为什么下面的用例**刻意不断言"哪一项 FAIL"、也不断言退出码为 1**：
+ *   · FAIL 集合是**环境函数**，不是代码契约。装了 codegraph 的机器上 supply:codegraph 转 OK，
+ *     整个 --supply-chain 全绿、exit 0；把这些用例写成"必须有 FAIL"或"必须 exit 1"，
+ *     等于让 CI 在环境变好时变红——测试就成了阻止改善的倒挂断言。
+ *   · 因此断言的是**与环境无关的不变量**：① 取证项 id 齐全（supply:lock / upstream-license /
+ *     engines / license / codegraph 都在）；② 每个 FAIL 与 WARN 都带非空 fix 与 detail
+ *     （笼统报错在本项目视为缺陷）；③ report.ok 与"是否存在 FAIL"严格一致；
+ *     ④ 退出码与 report.ok 一致（用的是 `r.status === 0 === report.ok` 的**相对**关系，
+ *     两侧同跑同环境，不写死 0 或 1）。
+ *   这四条在"全绿"和"codegraph 缺失"两种环境下都成立，也在许可证判据被改坏时会如实变红。
  */
 describe('doctor.mjs --supply-chain 供应链取证', () => {
   it('输出含 upstream lock 的 commit 状态、engines、LICENSE 首行', () => {

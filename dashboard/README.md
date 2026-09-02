@@ -1,120 +1,160 @@
-# OMZ dashboard（可选展示层）
+**English** | [简体中文](./README.zh-CN.md)
 
-只读状态面板：loopback-only HTTP + SSE，展示 agents / DAG / mailbox / events / audit。
-对应 `DESIGN.md` §1.5 结论 4、§3.1、§3.3 `dashboard` profile、§13.5 I5、§15.3、§9 M3。
+# OMZ dashboard (optional presentation layer)
 
-**定位**：默认关闭的可选 profile。没有 dashboard 请求就不启动端口（§15.3-2）；启动失败或关闭时回退
-**ZCode GUI 任务面板 + `/omz-status`**，不影响 coordinator 调度（§15.3-5）。
-**启用**：`<project>/.zcode/config.json` → `{ "omz": { "dashboard": { "enabled": true } } }`
+A read-only status panel: loopback-only HTTP + SSE, showing agents / DAG / mailbox / events / audit.
+Corresponds to `DESIGN.md` §1.5 conclusion 4, §3.1, the §3.3 `dashboard` profile, §13.5 I5, §15.3, §9 M3.
+
+**Positioning**: an optional profile that is off by default. Without a dashboard request no port is opened
+(§15.3-2); if startup fails or it is off, it falls back to the **ZCode GUI task panel + `/omz-status`**, without
+affecting coordinator scheduling (§15.3-5).
+**Enabling**: `<project>/.zcode/config.json` → `{ "omz": { "dashboard": { "enabled": true } } }`
 
 ```bash
-node dashboard/server.mjs --project /path/to/project [--db <sqlite>] [--port 0]  # 纯 HTTP，零依赖
-node dashboard/main.mjs   --project /path/to/project                             # Electron 壳，缺失则自动降级
+node dashboard/server.mjs --project /path/to/project [--db <sqlite>] [--port 0]  # pure HTTP, zero dependencies
+node dashboard/main.mjs   --project /path/to/project                             # Electron shell, auto-degrades if absent
 
-# `/path/to/project` 是占位符，必须换成**项目根的真实绝对路径**（Windows 上逐字复制会得到不存在的路径）。
-# 在项目根里直接跑，最省事的形态（Git Bash / PowerShell 均可，路径含空格靠引号兜住）：
+# `/path/to/project` is a placeholder and must be replaced with the **real absolute path of the project root**
+# (copying it verbatim on Windows yields a path that does not exist).
+# Run it right in the project root — the least troublesome form (Git Bash / PowerShell both work; quotes cover
+# paths containing spaces):
 node dashboard/server.mjs --project "$PWD"
-# Windows 显式路径示例：node dashboard/server.mjs --project "D:/work/my-project"
+# Explicit Windows path example: node dashboard/server.mjs --project "D:/work/my-project"
 ```
 
-URL（含 token）打印到 **stderr**，stdout 保持干净。`Ctrl+C` 优雅关闭。
+The URL (including the token) is printed to **stderr**; stdout stays clean. `Ctrl+C` shuts down gracefully.
 
-## 只读契约
+## The read-only contract
 
-所有端点都是 GET，**任何其它方法一律 405**。没有写入、提交、重试或命令执行端点——dashboard 不能扩大主 agent
-权限（§15.3-4）。改状态请走 coordinator MCP 工具或 `/team`。
+All endpoints are GET; **any other method is always 405**. There is no write, submit, retry or command-execution
+endpoint — the dashboard cannot enlarge the main agent's privileges (§15.3-4). To change state, go through the
+coordinator MCP tools or `/team`.
 
-| 路径 | 鉴权 | 返回 |
+| Path | Authentication | Returns |
 |---|---|---|
-| `/`、`/index.html`、`/app.js`、`/app.css` | loopback + CORS（**免 token**） | 静态白名单文件（非白名单名 → 404） |
-| `/api/snapshot` | + **token** | 统一状态快照 JSON |
-| `/api/events?since=<id>` | + **token** | SSE 流（1500ms 共享轮询、仅变化时推、15s 心跳；上限 8 条） |
-| `/healthz` | loopback + CORS（**免 token**） | `{ ok, source }` —— 无 degraded 细节、无路径 |
-| 其它 / 非 GET | — | 404 / 405 |
+| `/`, `/index.html`, `/app.js`, `/app.css` | loopback + CORS (**no token**) | the static whitelisted files (a non-whitelisted name → 404) |
+| `/api/snapshot` | + **token** | the unified status snapshot JSON |
+| `/api/events?since=<id>` | + **token** | the SSE stream (1500ms shared polling, pushed only on change, 15s heartbeat; capped at 8) |
+| `/healthz` | loopback + CORS (**no token**) | `{ ok, source }` — no degraded detail, no paths |
+| anything else / non-GET | — | 404 / 405 |
 
-## 鉴权分层：明文规则（改 `PUBLIC_PATHS` 前必读）
+## Authentication tiering: the explicit rules (required reading before changing `PUBLIC_PATHS`)
 
-**判据只有一条：响应里有没有运行时数据。** 不是「方便」，也不是「浏览器带不上 token 所以放行」——后者只是
-静态壳恰好满足判据的原因。
+**There is only one criterion: whether the response contains runtime data.** Not "convenience", and not "the browser
+cannot carry the token so let it through" — the latter is merely the reason the static shell happens to satisfy the
+criterion.
 
-1. **免 token 的只能是「编译期固定字节、不含任务/路径/token 的静态壳」**：`/`、`/index.html`、`/app.js`、
-   `/app.css`，其全部数据由 renderer 再发 `/api/*` 取得。理由：浏览器只把 token 带在**地址栏那一个请求**上
-   （`?token=`），随后 `<link href="/app.css">`/`<script src="/app.js">` 的子资源请求由浏览器自己发出，**不带
-   任何凭据**；静态壳放到 token 门之后，默认路径（token 每次启动随机生成）下 CSS/JS 必然 401 → 面板不可用。
-2. **`/healthz` 免 token 但必须保持最小化**：只回 `{ ok, source }`。`degraded[]` 的 reason 含 coordinator db 绝对
-   路径，属需 token 信息，已移出 healthz（仍在 `/api/snapshot`）。另有 `HEALTHZ_TTL_MS`（1000ms）结果缓存，
-   免鉴权端点不得成为全量快照的 CPU 放大器。
-3. **任何返回运行时数据的端点（`/api/*`）必须 token**：无凭据 401（带 `WWW-Authenticate: Bearer`），坏凭据 403。
-   它们是唯一会吐出绝对路径与任务内容的面。
-4. **免 token 集合由 `STATIC_FILES` 的 key + `/healthz` 派生，不手写字面量**：
-   `PUBLIC_PATHS = new Set([...STATIC_FILES.keys(), '/healthz'])`，且必须与流水线里实际放行的分支同源
-   （`STATIC_FILES.has(pathname)` 与 `pathname === '/healthz'`）。两份清单只要能各自漂移，就一定会漂移。
+1. **The only things allowed without a token are "the static shell: bytes fixed at compile time, containing no
+   tasks/paths/token"**: `/`, `/index.html`, `/app.js`, `/app.css`, all of whose data the renderer fetches later via
+   `/api/*`. The reason: the browser carries the token only on **that one address-bar request** (`?token=`), and the
+   subsequent subresource requests for `<link href="/app.css">`/`<script src="/app.js">` are issued by the browser
+   itself, **carrying no credentials at all**; put the static shell behind the token gate and the CSS/JS are bound to
+   get 401 on the default path (the token is randomly generated at every startup) → the panel is unusable.
+2. **`/healthz` needs no token but must stay minimal**: it returns only `{ ok, source }`. The reason strings in
+   `degraded[]` contain the absolute path of the coordinator db, which is token-required information and has been
+   moved out of healthz (it is still in `/api/snapshot`). There is also a `HEALTHZ_TTL_MS` (1000ms) result cache: an
+   unauthenticated endpoint must not become a CPU amplifier for the full snapshot.
+3. **Any endpoint that returns runtime data (`/api/*`) must require a token**: no credentials → 401 (with
+   `WWW-Authenticate: Bearer`), bad credentials → 403. They are the only surface that emits absolute paths and task
+   content.
+4. **The token-free set is derived from the keys of `STATIC_FILES` + `/healthz`, never hand-written as literals**:
+   `PUBLIC_PATHS = new Set([...STATIC_FILES.keys(), '/healthz'])`, and it must share a source with the branch that
+   actually lets requests through in the pipeline (`STATIC_FILES.has(pathname)` and `pathname === '/healthz'`). If two
+   lists *can* drift from each other, they *will*.
 
-> **给未来维护者的告警**：往 `PUBLIC_PATHS` 里加任何 `/api/*` 路径**等于把数据端点公开**。
-> `tests/dashboard.test.mjs` 的 I10 组有同源断言会拦住（严格等于 `STATIC_FILES` 键集 ∪ `{/healthz}`、不得含
-> `/api/` 前缀、并在 token 非空的服务上逐路径验放行面），**不要试图绕过它**：这条判据此前只活在代码注释和
-> 一个没人读的常量里，于是有人把 `/api/snapshot` 加进免鉴权集合而测试全绿。
+> **A warning to future maintainers**: adding any `/api/*` path to `PUBLIC_PATHS` **means publishing a data
+> endpoint**. The I10 group in `tests/dashboard.test.mjs` has same-source assertions that will stop you (strictly
+> equal to the key set of `STATIC_FILES` ∪ `{/healthz}`, must not contain the `/api/` prefix, and the pass-through
+> surface is verified path by path against a service with a non-empty token) — **do not try to work around them**:
+> this criterion previously lived only in a code comment and in a constant nobody read, whereupon somebody added
+> `/api/snapshot` to the unauthenticated set and the tests were all green.
 
-## 其余 I5 防护（逐条落点见 `server.mjs` 文件头注释）
+## The rest of the I5 protections (for where each one lands see the file-header comment in `server.mjs`)
 
-- **只绑 loopback**：`isLoopbackRequest()` 在校验 token **之前**判来源，非 loopback 直接 403 + `socket.destroy()`。
-- **随机端口 + 每次启动随机 token**：`port = 0` 系统分配；`crypto.randomBytes(24)`，比较用 `timingSafeEqual`
-  （长度不等先判 false）。token 进程级、不落盘、不进 stdout、退出即失效，泄露的补救就是重启。
-- **CORS 白名单**：仅 `http://127.0.0.1:<本端口>` 与 `http://localhost:<本端口>`；无 `Origin`（同源/curl）放行。
-  `checkRequestTarget()` 另收紧请求行：origin-form 放行，absolute-form 必须命中本服务自身 origin 否则 400，
-  authority-form 与非 http scheme 一律拒绝。静态资源只按 pathname 精确查表、从不拼路径，故 `/..%2fpackage.json`
-  之类只是「不在表里的 key」→ 404，路径穿越在结构上不可能。
-- **SSE 只发结构化事件**（`snapshot` / `heartbeat`），不透传终端流、不承载命令；**CSP** `default-src 'none'` 禁
-  内联脚本。renderer 侧服务端字符串只经 `textContent`，渲染前剥 ANSI 与控制字符、>2000 字符截断。
-- **Electron 壳没有 preload、也没有任何 IPC 通道**（这条此前写作"preload 只暴露 `getBootInfo()`"，已撤下，见下节）。
+- **Bind to loopback only**: `isLoopbackRequest()` judges the origin **before** validating the token; a non-loopback
+  request gets a straight 403 + `socket.destroy()`.
+- **A random port + a random token at every startup**: `port = 0` lets the system allocate;
+  `crypto.randomBytes(24)`, compared with `timingSafeEqual` (unequal lengths are judged false first). The token is
+  process-level, never written to disk, never on stdout, and invalid the moment the process exits; the remedy for a
+  leak is to restart.
+- **The CORS whitelist**: only `http://127.0.0.1:<this port>` and `http://localhost:<this port>`; no `Origin`
+  (same-origin/curl) is let through. `checkRequestTarget()` additionally tightens the request line: origin-form is
+  let through, absolute-form must match this service's own origin or it is 400, and authority-form plus non-http
+  schemes are always rejected. Static resources are looked up in the table by exact pathname and paths are never
+  concatenated, so something like `/..%2fpackage.json` is merely "a key that is not in the table" → 404; path
+  traversal is structurally impossible.
+- **SSE only emits structured events** (`snapshot` / `heartbeat`); it does not pass terminal streams through and
+  carries no commands. **CSP** `default-src 'none'` forbids inline scripts. On the renderer side, server strings go
+  only through `textContent`, with ANSI and control characters stripped before rendering and truncation past 2000
+  characters.
+- **The Electron shell has no preload and no IPC channel whatsoever** (this item previously read "preload exposes
+  only `getBootInfo()`"; it has been withdrawn, see the next section).
 
-前四条（loopback / 随机端口+随机 token / CORS / SSE+CSP+只读）都在 `tests/dashboard.test.mjs` 里有实测覆盖，
-且不依赖 Electron 是否存在。最后一条是**结构性事实**（`windowOptions()` 的返回值里没有 `preload` 键），
-不是运行时行为，因此靠代码本身而不是断言保证。
+The first four (loopback / random port + random token / CORS / SSE+CSP+read-only) all have measured coverage in
+`tests/dashboard.test.mjs`, and do not depend on whether Electron is present. The last one is a **structural fact**
+(the return value of `windowOptions()` has no `preload` key), not a runtime behavior, so it is guaranteed by the code
+itself rather than by an assertion.
 
-## 为什么 Electron 壳不需要 preload
+## Why the Electron shell does not need a preload
 
-`main.mjs` 的 `windowOptions()` 里**没有 `preload` 字段**，也不注册任何 IPC 通道。因为 renderer 不需要主进程数据：
+`windowOptions()` in `main.mjs` has **no `preload` field**, and registers no IPC channel either. Because the renderer
+does not need data from the main process:
 
-1. **页面与数据都来自 loopback HTTP 服务**：`index.html`/`app.js`/`app.css` 是服务端静态白名单文件，运行时数据全由
-   renderer 自己 `fetch('/api/*')` 取得。主进程手上没有 renderer 拿不到的东西。
-2. **token 走地址栏 query**：`urlOf('/')` 拼 `?token=`，`loadURL` 把它带进页面，renderer 从 `location.search` 读
-   （`app.js` 的 `token()`）。不需要一个桥来交接启动信息。
-3. **这个壳就是个只能访问本服务的浏览器窗口**：`setWindowOpenHandler` 拒绝所有新窗口，`will-navigate` 只放行
-   `http://127.0.0.1:<本端口>/`。窗口之外没有第二套能力面。
+1. **Both the page and the data come from the loopback HTTP service**: `index.html`/`app.js`/`app.css` are the
+   server's static whitelisted files, and all runtime data is fetched by the renderer itself via `fetch('/api/*')`.
+   The main process holds nothing the renderer cannot get.
+2. **The token travels in the address-bar query**: `urlOf('/')` appends `?token=`, `loadURL` carries it into the
+   page, and the renderer reads it from `location.search` (`token()` in `app.js`). No bridge is needed to hand over
+   boot information.
+3. **This shell is just a browser window that can only reach this service**: `setWindowOpenHandler` rejects all new
+   windows, and `will-navigate` only allows `http://127.0.0.1:<this port>/`. There is no second capability surface
+   outside the window.
 
-删掉它的直接原因是它与 `sandbox: true` 互相排斥：Electron 官方文档明确 sandboxed preload 以普通脚本（非 ESM 上下文）
-加载、不能用 ESM import，而原文件是 `preload.mjs`。它靠 `typeof require` 守卫躲开了抛错，代价是**sandbox 下
-`contextBridge` 是否可达没有任何文档承诺**——也就是说"这道防护是否生效"根本无法验证。加上 renderer 对
-`omzDashboard` / `getBootInfo` **零引用**（`app.js` 与 `index.html` 里一处都没有），它实际是死代码，却以"preload 只
-暴露最小面"的形式挂在 I5 清单里充当安全承诺。**无法验证的承诺比没有承诺更坏**，所以连文件带清单条目一起撤下：
-没有 preload 就没有 contextBridge 面，也没有可被误用的 IPC 入口。
+The immediate reason for deleting it is that it is mutually exclusive with `sandbox: true`: Electron's official
+documentation states explicitly that a sandboxed preload is loaded as an ordinary script (a non-ESM context) and
+cannot use ESM imports, while the original file was `preload.mjs`. It dodged the throw with a `typeof require` guard,
+at the cost that **there is no documented promise whatsoever about whether `contextBridge` is reachable under
+sandbox** — which is to say, "whether this protection is in effect" simply cannot be verified. Add to that the
+renderer's **zero references** to `omzDashboard` / `getBootInfo` (not one, anywhere in `app.js` or `index.html`), and
+it was in fact dead code, yet it hung on the I5 list as a security promise in the shape of "preload exposes only a
+minimal surface". **An unverifiable promise is worse than no promise**, so the file and the list item were withdrawn
+together: with no preload there is no contextBridge surface, and no IPC entry point that could be misused.
 
-将来若真需要主进程数据，用 `preload.cjs`（sandbox 下按 CJS 加载）并在上面的清单里同步登记暴露面——**不要**再放
-`.mjs` preload。
+If data from the main process is ever genuinely needed, use `preload.cjs` (loaded as CJS under sandbox) and register
+the exposed surface in the list above at the same time — **do not** put an `.mjs` preload back.
 
-## SSE：连接上限与单一共享轮询器
+## SSE: the connection cap and the single shared poller
 
-`MAX_SSE_STREAMS = 8`，超限 `503` + `Retry-After: 5`。所有连接共用**一个**定时器采集并广播同一份 payload，
-CPU 与连接数解耦（8 条与 1 条的 `collectSnapshot()` 频率相同）。最后一个订阅者断开即停定时器；定时器一律
-`unref()`。帧 id **每连接局部**：`Last-Event-ID` / `?since=` 只作本连接计数起点，不写回全局计数器（此前传
-`Number.MAX_SAFE_INTEGER` 会让 `+1` 失去精度，把所有客户端帧 id 钉死在同一值）；入参经 `parseEventCursor()`
-校验（非纯数字、非安全整数、`<=0`、`> MAX_EVENT_ID` 一律从 0 开始）。续接语义是「下一帧即最新全量」，不回放。
+`MAX_SSE_STREAMS = 8`, over the limit `503` + `Retry-After: 5`. All connections share **one** timer that collects and
+broadcasts the same payload, decoupling CPU from the connection count (the `collectSnapshot()` frequency is the same
+for 8 connections as for 1). The timer stops as soon as the last subscriber disconnects; timers are always
+`unref()`ed. Frame ids are **local to each connection**: `Last-Event-ID` / `?since=` serve only as the counting start
+point for this connection and are not written back to the global counter (previously passing
+`Number.MAX_SAFE_INTEGER` would make `+1` lose precision and pin all clients' frame ids to the same value); the input
+is validated by `parseEventCursor()` (non-numeric, non-safe-integer, `<=0`, `> MAX_EVENT_ID` all start from 0). The
+resumption semantics are "the next frame is the latest full snapshot"; there is no replay.
 
-## 数据源双轨与两处同步纪律
+## The dual-track data source and two synchronization disciplines
 
-`collectSnapshot()` 优先只读打开 coordinator SQLite → `source: 'coordinator'`；db 缺失/损坏/查询失败则**回退**
-`tools/render-status.mjs` 的 `.omz/` 文件视图 → `source: 'files'`，原因写进 `degraded[]`，**绝不 500**。
-`transport_state`（agents）与 `coordinator_state`（tasks.status）永远分两列，不互推不合并（I3）；文件视图无传输
-维度，`transport_state` 恒 `null`。首屏 `/api/snapshot` 返回 401/403 时**不**建立 SSE（同 token 的 EventSource
-必然失败且会无限重连），直接提示凭据无效。
+`collectSnapshot()` first opens the coordinator SQLite read-only → `source: 'coordinator'`; if the db is missing,
+corrupt, or the query fails it **falls back** to the `.omz/` file view of `tools/render-status.mjs` →
+`source: 'files'`, with the reason written into `degraded[]`, and **never a 500**. `transport_state` (agents) and
+`coordinator_state` (tasks.status) are always two separate columns, never inferred from each other or merged (I3);
+the file view has no transport dimension, so `transport_state` is always `null`. When the first-screen
+`/api/snapshot` returns 401/403, SSE is **not** established (an EventSource with the same token would inevitably fail
+and reconnect endlessly); it reports invalid credentials directly instead.
 
-- **状态枚举**：`renderer/app.js` 的 `STATES`（唯一定义处）与 `app.css` 的 `.pill[data-state=...]` 必须同时覆盖
-  coordinator 7 态（`blocked` `ready` `running` `done` `failed` `dead` `unknown`）与文件视图额外 2 态
-  `pending`（灰蓝）、`corrupt`（橙红加粗）。`corrupt`（文件读不出来）不得与 `unknown`（状态不可判定）混为一谈。
-- **跨图关联键是数字 task id**，不是 key（`UNIQUE(graph_id, key)` 只保证图内唯一）。`buildMirrorIndex()` 三档
-  降级：有数字 id → 按 id；只有字符串 id 且本 team 内 key 无重名 → 按 key（双射）；有重名 → **只对重名的那些
-  key** 退化为不关联并写 `degraded[]`。绝不按 key 猜：错误关联比缺字段更有害。
+- **The state enums**: `STATES` in `renderer/app.js` (the only place it is defined) and the
+  `.pill[data-state=...]` selectors in `app.css` must cover both the coordinator's 7 states (`blocked` `ready`
+  `running` `done` `failed` `dead` `unknown`) and the file view's 2 extra states, `pending` (grey-blue) and `corrupt`
+  (orange-red, bold). `corrupt` (the file cannot be read) must not be conflated with `unknown` (the state cannot be
+  determined).
+- **The cross-graph join key is the numeric task id**, not the key (`UNIQUE(graph_id, key)` only guarantees
+  uniqueness within a graph). `buildMirrorIndex()` degrades in three tiers: numeric ids present → join by id; only
+  string ids and no duplicate keys within this team → join by key (a bijection); duplicates present → **only for
+  those duplicated keys** degrade to no join and write `degraded[]`. Never guess by key: a wrong join is more harmful
+  than a missing field.
 
-`isMain` 用 `fileURLToPath(import.meta.url)` 比对 `process.argv[1]`，**不能**用 `new URL(...).pathname`（
-percent-encoded，安装目录含空格或非 ASCII 时永不相等，`node dashboard/server.mjs` 会静默 exit 0）。
+`isMain` compares `fileURLToPath(import.meta.url)` against `process.argv[1]`; it **must not** use
+`new URL(...).pathname` (percent-encoded — never equal when the install directory contains spaces or non-ASCII
+characters, and `node dashboard/server.mjs` then silently exits 0).

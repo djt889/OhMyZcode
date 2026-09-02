@@ -1,5 +1,37 @@
 # NOTICE
 
+**English**
+
+This file records the third-party sources and attribution statements of OMZ (Oh My ZCode). `LICENSE`
+contains only the full MIT text of this project itself, so that GitHub's license detection correctly
+identifies it as MIT; the source statements are collected here.
+
+## Upstream source: oh-my-openagent (OmO)
+
+OMZ's orchestration protocol — the ultrawork lifecycle, plus the protocol text of the four skills
+`ulw-plan` / `ulw-execute` / `ulw-research` / `review-work` — is **selectively ported** from
+oh-my-openagent (OmO), repository <https://github.com/code-yeongyu/oh-my-openagent>. The port is
+capability parity and a rewrite, not a whole-repository fork and not code transplantation; the sync
+discipline is in `DESIGN.md` §16.
+
+- Per-path source pinning (`source` / `ported_paths` / `omz_target` / `port_status`) is in
+  `upstream/omo-sources.lock.json`.
+- Upstream license information, the sync process, and the non-applicable paths are in the `license`
+  block of `upstream/omo-sources.lock.json` and in `upstream/README.md`. Those two places are
+  authoritative; this file does not restate any license conclusion.
+- The evidence status can be inspected on the spot with `node tools/doctor.mjs --supply-chain` (the
+  `supply:lock` and `supply:upstream-license` items).
+
+## Optional external dependency
+
+The `graph` profile requires the user to install `@colbymchenry/codegraph` themselves; this
+repository contains neither its code nor its index, and makes no statement about its license.
+Installation and version evidence are likewise available via `node tools/doctor.mjs --supply-chain`.
+
+---
+
+**简体中文**
+
 本文件记录 OMZ（Oh My ZCode）的第三方来源与归属声明。`LICENSE` 只含本项目自身的 MIT 全文，
 以便 GitHub 的许可证识别正确判定为 MIT；来源说明集中在此。
 
