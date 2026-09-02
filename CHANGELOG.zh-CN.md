@@ -2,11 +2,32 @@
 
 # OMZ 实现变更日志
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.6.0** ↔ DESIGN **v1.5**（1.6.0 是文档与缺陷修复版本，未改动设计规格）。
+**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.6.1** ↔ DESIGN **v1.5**（1.6.0 与 1.6.1 都是文档与缺陷修复版本，均未改动设计规格）。
 
 **跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
 
 每个条目记录三件事：**范围**（交付了什么）、**验证**（怎么证明它工作，用可复现的数字）、**已知缺口**（当时还没有的）。数字均取自 2026-09-01 在 Node v22.14.0 / Windows 上的实际运行输出。
+
+---
+
+## 1.6.1 — README 里放上经过验证的四层架构图（2026-09-02）
+
+**范围**
+
+- **四层架构图，中英各一张，内嵌进两份顶层 README。** 两张都由 `docs/` 下的 [archify](https://github.com/tt-a1i/archify) 类型化规格生成，每种语言四个文件：规格（唯一手改的那个）、自包含的交互式 HTML 查看器、以及图面本体的明暗两版 PNG 截图供 GitHub 内联渲染。README 用 `<picture>` 配 `prefers-color-scheme`，所以用 GitHub 暗色主题的读者拿到的是暗色截图。
+  两种语言是**拓扑相同的两份独立规格**，不是同一个文件换字符串：节点尺寸与 viewBox 按语言分别调过，因为在渲染器的度量模型里 CJK 字形宽度是两倍；查看器自身的 UI 语言随 `meta.locale` 走。7 个组件带 `sources` 引用指向本仓库真实文件（coordinator 的 MCP 入口与 schema、dashboard 的全 GET 接口面、`probeCodegraph`、评审门 agent、八步生命周期命令、状态渲染器）；`deliver` 会拿记录的 revision 去仓库核实这些路径，而不是信规格里写的。
+- **这张图想说什么。** 拓扑就是 DESIGN §3.1 加 §3.3 合成一帧：执行层是唯一必然存在的（`core`），另外三层各有自己默认关闭的开关与自己的回退。四条导览视图分别走默认 `core` 路径、DAG 调度、语义检索、三条回退链。
+- **`docs/README.md` + `docs/README.zh-CN.md`** 记录如何重新生成、为什么 HTML 才是真正的产物而 PNG 只是 GitHub 能内联的那份、以及**入仓这几个字节**的验证状态。
+
+**验证**
+
+两种语言，均在各自规格 `meta.repository` 记录的 revision 上：`validate` 与 `deliver` 报 `showcase` profile 下 **9/9 artifact 检查**通过、**0 error 0 warning**，仓库取证对 7 处源码引用**核实通过**。`visual-check` 报 **`status: pass`**——1440×900、1600×1000、1920×1080、2048×1320 四档均无纵横向溢出，最紧一档的最小投影节点字号为 **7.6px**（英文）与 **7.8px**（中文），下限 6px。渲染出的明暗两版截图已逐张目视复核。本轮未改动但重跑：`npm test` **573 tests / 102 suites，0 失败**；`node tools/doctor.mjs` **无 FAIL**；`node tools/validate-frontmatter.mjs .` 通过。
+
+**已知缺口**
+
+- `showcase` 通过是关于**构图与容纳性**的机械判据——没有边穿过无关节点、没有标签被遮挡、桌面视口不溢出。它不说明画出来的事实对不对；那仍由 DESIGN §3.1 与 §3.3 负责。
+- PNG 是截图，不会自动跟着规格走。改了规格却没重跑 `deliver` 与重新截图，README 上仍是上一版图，而测试套件里没有任何一条会因此变红。重新生成的命令在 `docs/README.zh-CN.md`。
+- §10.2 里依赖真实环境的五项（V3/V4/V8′/V10/V11）本轮未触碰。
 
 ---
 

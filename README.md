@@ -4,11 +4,24 @@
 
 > **License boundary**: This repository is distributed under MIT (`LICENSE` contains only the full MIT text of this project itself). The upstream project [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) is under the **Sustainable Use License 1.0** (not an OSI license; it limits use to your own internal business purposes or to non-commercial/personal use). That license has been verified and is recorded, together with a verbatim overlap analysis, in `upstream/omo-sources.lock.json`: against the 15,824 8-grams of the four upstream `SKILL.md` files, only 9 8-grams are shared, and all 9 come from one and the same JSON enum line. How the boundary between the two licenses is to be judged is the project owner's decision; `upstream/` only records evidence.
 
-A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.6.0).
+A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.6.1).
 
 ## Purpose
 
 Make projects on ZCode turn out better, weighting four classes of capability equally: parallel throughput (faster), specialized division of roles (deeper), independent review plus dual evidence (more reliable), and interview-driven planning (more accurate).
+
+## Architecture at a glance
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/omz-architecture.dark.png">
+  <img src="./docs/omz-architecture.light.png" alt="The OMZ four-layer architecture: an execution layer where the main agent spawns 9 subagents that write results into .omz/ state files, a presentation layer holding the ZCode GUI panel and the loopback dashboard, a scheduling layer where the coordinator MCP claims tasks against SQLite WAL, and a semantics layer where the upstream CodeGraph MCP checks the per-project .codegraph/ index.">
+</picture>
+
+<sub>The diagram is wide, so GitHub scales it down to the README column — open it full size ([light](./docs/omz-architecture.light.png) · [dark](./docs/omz-architecture.dark.png)) to read the labels.</sub>
+
+Only the execution layer is always present — that is the `core` profile. The other three layers each sit behind their own switch that is **off by default**, and each has its own fallback, so a layer that is absent or broken degrades only itself: `graph` falls back to the built-in Explore plus Bash grep, `orchestration` to wave state files under `.omz/runtime/`, and `dashboard` to the ZCode GUI task panel plus `/omz-status`.
+
+The same diagram is also a standalone interactive page, `docs/omz-architecture.html` — clone or download the repository and open it in a browser (GitHub does not render repository HTML inline). It carries four guided views (the default `core` path, DAG scheduling, semantic retrieval, and the three fallback chains), click-to-focus on any component, and source references back into this repository. The narrative version of the same structure is DESIGN §3.1 and §3.3; how the artifact is generated and verified is described in [docs/README.md](./docs/README.md).
 
 ## Installation (core profile, the default)
 
@@ -76,7 +89,7 @@ Each layer can be turned off individually; a failure only degrades the correspon
 ## Development and testing
 
 ```bash
-npm test                  # All tests: 572 cases / 102 suites (equivalent to node --test tests/)
+npm test                  # All tests: 573 cases / 102 suites (equivalent to node --test tests/)
 node --test tests/        # Same as above; a single file, e.g. node --test tests/protocol.test.mjs
 npm run test:protocol     # Per-file scripts (9): path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
                           # capability and cli have no dedicated script; run them one by one with node --test tests/<file>

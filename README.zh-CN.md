@@ -4,11 +4,24 @@
 
 > **许可证边界**：本仓库以 MIT 分发（`LICENSE` 只含本项目自身的 MIT 全文）。上游 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 采用 **Sustainable Use License 1.0**（非 OSI 协议，限定为自有内部业务用途或非商业/个人用途）。该许可证已核实，并连同逐字重叠度分析一起记录在 `upstream/omo-sources.lock.json`：与上游四个 `SKILL.md` 的 15,824 个 8-gram 比对，共享 8-gram 仅 9 个，且全部来自同一处 JSON 枚举行。两个许可证之间的边界如何判断属项目所有者的决定，`upstream/` 只做取证记录。
 
-对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.zh-CN.md](./DESIGN.zh-CN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)（当前 1.6.0）。
+对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.zh-CN.md](./DESIGN.zh-CN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)（当前 1.6.1）。
 
 ## 定位
 
 让 ZCode 上的项目做得更好：并行吞吐（更快）、角色专业分工（更深）、独立评审与双证据（更可靠）、访谈式规划（更准）四类能力并重。
+
+## 架构一览
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/omz-architecture.zh-CN.dark.png">
+  <img src="./docs/omz-architecture.zh-CN.light.png" alt="OMZ 四层架构：执行层里主 agent spawn 9 个子代理、结果写入 .omz/ 状态文件；展示层是 ZCode GUI 面板与 loopback dashboard；调度层里 coordinator MCP 对 SQLite WAL 做原子 claim；语义层里上游 CodeGraph MCP 校验 per-project 的 .codegraph/ 索引。">
+</picture>
+
+<sub>图很宽，GitHub 会按 README 栏宽缩放——看清标签请打开原尺寸（[明色](./docs/omz-architecture.zh-CN.light.png) · [暗色](./docs/omz-architecture.zh-CN.dark.png)）。</sub>
+
+只有执行层是必然存在的，那就是 `core` profile。另外三层各有自己的开关且**默认全部关闭**，也各有自己的回退，所以某一层缺失或坏掉只降级它自己：`graph` 回退到内置 Explore 加 Bash grep，`orchestration` 回退到 `.omz/runtime/` 下的波次状态文件，`dashboard` 回退到 ZCode GUI 任务面板加 `/omz-status`。
+
+同一张图还有独立的交互页面 `docs/omz-architecture.zh-CN.html`——克隆或下载仓库后用浏览器打开（GitHub 不内联渲染仓库里的 HTML）。页面带四条导览视图（默认 `core` 路径、DAG 调度、语义检索、三条回退链）、点击任一组件聚焦、以及指回本仓库的源码引用。同一结构的文字版是 DESIGN §3.1 与 §3.3；产物如何生成与验证见 [docs/README.zh-CN.md](./docs/README.zh-CN.md)。
 
 ## 安装（core profile，默认）
 
@@ -76,7 +89,7 @@
 ## 开发与测试
 
 ```bash
-npm test                  # 全部测试：572 用例 / 102 suites（等价 node --test tests/）
+npm test                  # 全部测试：573 用例 / 102 suites（等价 node --test tests/）
 node --test tests/        # 同上；单文件如 node --test tests/protocol.test.mjs
 npm run test:protocol     # 分文件脚本（9 个）：path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
                           # capability 与 cli 无独立脚本，用 node --test tests/<file> 单跑

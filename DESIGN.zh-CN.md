@@ -3,7 +3,7 @@
 # OMZ (Oh My ZCode) 设计文档
 
 - **版本**：**v1.5（装机验收修订版）** — 插件已装进 ZCode（`plugins.dirs` 指向本目录、`omz@inline` 启用），重启会话后跑完 `/omz-doctor`、`/omz-status`、`/ulw` 三项验收，本版回写真实会话内的实测证据
-- **状态**：v1.3 的全部规格已实现（9 个 agent 文件 + 5 commands + 4 skills + hooks + coordinator MCP + dashboard + adapters + tools），572 个测试通过、`/omz-doctor` 无 FAIL、hook self-test 30/30。**v1.5 完成装机后的真实会话验收**：`/omz-doctor` 在会话内逐个 spawn 9 个 agent，**9/9 返回 `OMZ-PONG`**（V12 结清）、只读白名单取得行为级确证、OMZ 四个 skill 在子代理侧可见（**B16 结清**），另得五条引擎/运行时新事实（§10.3 第 11–14 条、§10.1 V6 修订）；`/ulw` 端到端冒烟跑完一个完整生命周期（两轮评审门、双证据、终验 `confirmed`，可复现链路见 §18）。剩余未在真实环境验证项从六项减为**五项**（V3/V4/V8′/V10/V11，§10.2）。
+- **状态**：v1.3 的全部规格已实现（9 个 agent 文件 + 5 commands + 4 skills + hooks + coordinator MCP + dashboard + adapters + tools），573 个测试通过、`/omz-doctor` 无 FAIL、hook self-test 30/30。**v1.5 完成装机后的真实会话验收**：`/omz-doctor` 在会话内逐个 spawn 9 个 agent，**9/9 返回 `OMZ-PONG`**（V12 结清）、只读白名单取得行为级确证、OMZ 四个 skill 在子代理侧可见（**B16 结清**），另得五条引擎/运行时新事实（§10.3 第 11–14 条、§10.1 V6 修订）；`/ulw` 端到端冒烟跑完一个完整生命周期（两轮评审门、双证据、终验 `confirmed`，可复现链路见 §18）。剩余未在真实环境验证项从六项减为**五项**（V3/V4/V8′/V10/V11，§10.2）。
 - **日期**：2026-09-01
 - **对标项目**：[oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent)（68.5k★，OpenCode/Codex CLI 宿主）
 - **目标宿主**：ZCode Desktop 3.10.2+（glm 引擎 `zcode.cjs`）
@@ -184,7 +184,7 @@ OMZ 不把所有增强能力绑死在一个启动路径上，而是提供四个 
 │   ├── validate-frontmatter.mjs   # YAML/工具名校验（B23/B24）
 │   ├── sync-omo-skills.mjs        # §16.3 上游选择性同步
 │   └── lib/is-main.mjs            # CLI 入口判定（B22 共享实现）
-├── tests/                         # 102 suites / 572 tests
+├── tests/                         # 102 suites / 573 tests
 └── upstream/                      # omo-sources.lock.json + 移植记录（§16.4）
 ```
 
@@ -555,7 +555,7 @@ COMMIT;
 
 ## 9. 分阶段实施计划
 
-**状态列为 v1.5 实际完成情况**（v1.3 全部规格已实现并通过 572 个测试；**v1.5 补装机后真实会话验收**）。
+**状态列为 v1.5 实际完成情况**（v1.3 全部规格已实现并通过 573 个测试；**v1.5 补装机后真实会话验收**）。
 
 | 里程碑 | 内容 | 验证标准 | v1.5 实际状态 |
 |---|---|---|---|
@@ -979,7 +979,7 @@ I1–I6 只在启用 `graph`/`orchestration`/`dashboard` profile 时出现；`co
 
 ## 14. 置信度评估（v1.5 装机验收修订）
 
-按"能否照本文档直接实施并达到预期"逐层自评。评级依据是证据类型，不是主观感受。**v1.4 的关键变化**：coordinator/dashboard/hooks/tools 已实现且有测试（572 个测试、102 suites），所以"设计→代码"这一段的风险大幅下降；但**运行时验收的缺口换了位置**——从"没写代码"变成"没在真实环境跑过"（真实 ZCode 会话、多进程并发、CodeGraph 装机、Electron 真机）。**v1.5 的关键变化**：**"真实 ZCode 会话"这一格已经跑过了**——插件装进 ZCode、重启会话、`/omz-doctor` 9/9 spawn ping、`/ulw` 端到端冒烟跑完一个完整生命周期（§18）。这是第一次有**行为级证据**而非"代码 + 测试 + 引擎反查"的三重推断，所以本轮的上调不是乐观，而是证据类型升级；同时也第一次暴露了只有真实会话才看得见的事实（引擎注入工具、skill 数分档、内联块与脚本的净化能力差）。
+按"能否照本文档直接实施并达到预期"逐层自评。评级依据是证据类型，不是主观感受。**v1.4 的关键变化**：coordinator/dashboard/hooks/tools 已实现且有测试（573 个测试、102 suites），所以"设计→代码"这一段的风险大幅下降；但**运行时验收的缺口换了位置**——从"没写代码"变成"没在真实环境跑过"（真实 ZCode 会话、多进程并发、CodeGraph 装机、Electron 真机）。**v1.5 的关键变化**：**"真实 ZCode 会话"这一格已经跑过了**——插件装进 ZCode、重启会话、`/omz-doctor` 9/9 spawn ping、`/ulw` 端到端冒烟跑完一个完整生命周期（§18）。这是第一次有**行为级证据**而非"代码 + 测试 + 引擎反查"的三重推断，所以本轮的上调不是乐观，而是证据类型升级；同时也第一次暴露了只有真实会话才看得见的事实（引擎注入工具、skill 数分档、内联块与脚本的净化能力差）。
 
 | 层次 | 内容 | 置信度 | 证据类型 |
 |---|---|---|---|
@@ -990,7 +990,7 @@ I1–I6 只在启用 `graph`/`orchestration`/`dashboard` profile 时出现；`co
 | **触发层** | slash commands（M1）/ 关键词 hook（M2） | M1 **99%** / M2 **85%**（不变） | commands 展开链代码级证实。hook **已实现**（含 B29 的线性扫描与时间预算）且 `--self-test` 30/30、`tests/hooks.test.mjs` 全绿，但这些只证明**脚本本身正确**；`additionalContext` 是否被主 agent 真正看见**仍待装机实测（V3 未变）**，因此不上调。**v1.4 末轮新增两条确证（不改分数，改的是理解）**：① matcher 在 `UserPromptSubmit` 上不参与筛选（`RUr` 不传匹配值，`n6r` 空集合直接 true），启用后每条消息固定付 126–132ms node 启动税；② 顶层 `enabled` 不被插件加载链读取，真闸是元素级 `enabled` 与 `omz.keyword_hook`（§8.2）。默认不启用 `keyword_hook`，回退即常态 |
 | **展示层** | Electron dashboard/SSE、token 分层、注入防护 | **85%**（新列） | server 侧已实现并测试（静态壳/API 分层 I10、loopback 绑定、SSE 连接上限、`/healthz` 最小化、字段净化 B27）。**只验证了无 electron 的降级分支**；真机渲染与 CSP 实际拦截效果未验（§10.2 V11） |
 | **风险预案层** | B1–B30 + I1–I10 | **95%**（上调） | v1.4 新增的 B22–B30、I7–I10 **全部来自实际实现/审计中命中的缺陷**（不是推演），每条都有对应测试或验证手段；设计期的 B1–B21、I1–I6 中仍有部分未被真实故障样本检验（尤其依赖 profile 装机的 I1/I2/I5/I6）。**v1.5 上调理由**：四条预案在真实环境里取得行为级证据——**B16 结清**（skill 可见，回退方案作废）、**B1 白名单实测生效**、**B20 无 Grep/Glob 复验**、**B30 的修复实测有效**（`ZCODE_SESSION_ID` 确实拿不到、四种分支全部 exit 0 且回退标记明确）、**B27 量化出内联块与脚本的能力差**（41 行 vs 40 行）。**不给更高分**：B2/B5/B8/B9/B17/B18/B19 与依赖 profile 的 I1/I2/I5/I6 仍未被真实故障样本检验 |
-| **实现验收** | v1.3 全部规格是否已落地 + 装机后是否按预期运行 | **已完成**：572 tests / 102 suites 全通过、`/omz-doctor` 无 FAIL（1 项 WARN=codegraph 未装）、hook self-test 30/30、9 个 agent frontmatter 校验通过；**v1.5 追加装机验收**：会话内 9/9 spawn ping、`/ulw` 端到端冒烟跑完整生命周期（§18）、`.omz/` 卫生扫描零缺陷、插件仓库未被污染 | v1.4 离线产物 + **v1.5 真实会话产物**（行为级） |
+| **实现验收** | v1.3 全部规格是否已落地 + 装机后是否按预期运行 | **已完成**：573 tests / 102 suites 全通过、`/omz-doctor` 无 FAIL（1 项 WARN=codegraph 未装）、hook self-test 30/30、9 个 agent frontmatter 校验通过；**v1.5 追加装机验收**：会话内 9/9 spawn ping、`/ulw` 端到端冒烟跑完整生命周期（§18）、`.omz/` 卫生扫描零缺陷、插件仓库未被污染 | v1.4 离线产物 + **v1.5 真实会话产物**（行为级） |
 | **整体可交付性** | core 可独立使用，graph/orchestration/dashboard 可选启用并可回退 | **97%（代码交付 + core 装机验收）** | 从 v1.4 的 95% 上调 2 点。**分母未变**（仍是"这套代码能不能在真实环境里按预期跑"），变的是**证据类型**：v1.4 的 95% 建立在"代码 + 测试 + 引擎反查"的三重推断上，真实环境一次没跑；v1.5 的 core 主路径（doctor + ulw 全生命周期）**已在装机后的真实会话里跑通并接受了两轮独立评审**。**为什么只加 2 点而不是更多**：① 缺口数从六项减为五项，减掉的那一项（V12）恰是**唯一卡住 core 的**——剩下五项全在可选层或触发增强层，回退路径都已是常态形态；② 但只跑了**一个小特性、一条路径**，B18 续跑、`/team`、LIGHT/HEAVY、EXPAND 等分支未走到；③ 剩余的 3 点里，V10/V11 各占约 1 点（装机/真机未验）、V3/V4/V8′ 合占约 1 点。**这仍不是生产运行保证** |
 
 **为什么不是 100%（v1.5 装机验收：缺口从六项收到五项，且剩下的都不在 core 主路径上）**
@@ -1301,7 +1301,7 @@ omz/
 └── README.md
 ```
 
-`upstream/` 只记录来源版本、文件路径、commit SHA、许可证和移植状态；`adapters/zcode/` 隔离宿主差异；`tools/` 与 `tests/` 是运维与回归基座（v1.5：102 suites / 572 tests）；OMZ 实际运行代码全部位于自己的 `agents/`、`commands/`、`skills/`、`hooks/`、`mcp/` 与 `dashboard/`。
+`upstream/` 只记录来源版本、文件路径、commit SHA、许可证和移植状态；`adapters/zcode/` 隔离宿主差异；`tools/` 与 `tests/` 是运维与回归基座（v1.5：102 suites / 573 tests）；OMZ 实际运行代码全部位于自己的 `agents/`、`commands/`、`skills/`、`hooks/`、`mcp/` 与 `dashboard/`。
 
 ### 16.3 Git 分支与同步纪律
 
@@ -1599,4 +1599,4 @@ git diff upstream-sync..upstream/dev -- \
 | `/ulw` 端到端生命周期 | ✅ **已跑通（v1.5 装机验收，M1 验证标准）** | §18 可复现链路：planner → critic（4 blocker 打回）→ rev2（5 波→9 波）→ 两轮 junior（failing-first 真红：`# fail 4` / `# fail 2`）→ reviewer `needs-fix` → 复审 `confirmed`；终态 `npm test` 8/8/0、四条 SC 全 done、boulder `status: done`、`git status` 恰 4 条改动、`package.json` 零 diff。**未走到的分支**：B18 中断续跑、`/team` claim 过门、LIGHT/HEAVY、EXPAND、5-lane |
 | 置信度表述诚实 | ✅ | §14 区分**代码交付 + core 装机验收 97%** 与**五项**真实环境缺口（v1.4 末轮结清 V8 枚举与 V9 压测，**v1.5 结清 V12**），逐项给回退路径并说明本次验收为何没顺带结清剩余项 |
 
-*本文档为 v1.5 装机验收修订版。v1.3 的规格已全部实现并通过 572 个测试；**v1.5 完成装机后的真实会话验收**——`/omz-doctor` 会话内 9/9 spawn ping（V12 结清，连带结清 B16、给出 B1 行为级确证）、`/ulw` 端到端冒烟跑完整生命周期（§18），另得五条引擎/运行时新事实（§10.3 第 11–14 条、§10.1 V6 修订）。安装仍从 `core` 开始，graph/orchestration/dashboard 分别通过 §10.2 的对应验收后再启用（orchestration 的 V9 并发压测已过，见 §10.1）。仍未在真实环境验证的**五项**（V3/V4/V8′/V10/V11）各有明确回退路径，且**没有一项在 core 主路径上**——唯一卡 core 的 V12 已结清。OmO 后续更新只能经 §16 的选择性同步流程进入 OMZ；安装 OMZ 不改变 ZCode 默认聊天模式。*
+*本文档为 v1.5 装机验收修订版。v1.3 的规格已全部实现并通过 573 个测试；**v1.5 完成装机后的真实会话验收**——`/omz-doctor` 会话内 9/9 spawn ping（V12 结清，连带结清 B16、给出 B1 行为级确证）、`/ulw` 端到端冒烟跑完整生命周期（§18），另得五条引擎/运行时新事实（§10.3 第 11–14 条、§10.1 V6 修订）。安装仍从 `core` 开始，graph/orchestration/dashboard 分别通过 §10.2 的对应验收后再启用（orchestration 的 V9 并发压测已过，见 §10.1）。仍未在真实环境验证的**五项**（V3/V4/V8′/V10/V11）各有明确回退路径，且**没有一项在 core 主路径上**——唯一卡 core 的 V12 已结清。OmO 后续更新只能经 §16 的选择性同步流程进入 OMZ；安装 OMZ 不改变 ZCode 默认聊天模式。*

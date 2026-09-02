@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "OMZ 四层架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [1360, 610],
+    "repository": {
+      "url": "https://github.com/djt889/OhMyZcode",
+      "revision": "8aad5d71ef25e9832716520c73ff42a91a0760fd"
+    },
+    "views": [
+      {
+        "id": "core-only",
+        "label": "core：默认路径",
+        "focus": ["gui", "main", "agents", "state", "explore"],
+        "note": "默认只有 core 启用：主 agent 直接 spawn 子代理、状态落 .omz/ 文件，这条路径不依赖任何外部服务。"
+      },
+      {
+        "id": "orchestration",
+        "label": "orchestration：DAG 调度",
+        "focus": ["main", "coord", "sqlite", "agents"],
+        "note": "coordinator 只持久化身份、任务、依赖与租约；worker 仍由 ZCode Agent 工具启动，两者靠 agent_ref 与 task_id 关联。"
+      },
+      {
+        "id": "graph",
+        "label": "graph：语义检索",
+        "focus": ["main", "cg", "cgidx", "explore"],
+        "note": "codegraph_explore 一次往返给出源码加调用链；二进制缺失或索引早于 HEAD 即判陈旧，降级回内置 Explore。"
+      },
+      {
+        "id": "fallback",
+        "label": "三条回退链",
+        "focus": ["gui", "dash", "coord", "state", "cg", "explore"],
+        "note": "每个可选层失败只降级自己：dashboard 回 GUI 面板，orchestration 回 .omz/runtime 文件状态，graph 回内置 Explore。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "state",
+      "type": "database",
+      "label": ".omz/ 状态文件",
+      "sublabel": "goal · plans · results",
+      "tag": "core 回退源",
+      "pos": [60, 70],
+      "size": [200, 84],
+      "sources": [{ "path": "tools/render-status.mjs", "label": "状态渲染器" }]
+    },
+    {
+      "id": "agents",
+      "type": "backend",
+      "label": "9 个 OMZ 子代理",
+      "sublabel": "短命 worker，用完即弃",
+      "tag": "不可再 spawn",
+      "pos": [390, 70],
+      "size": [230, 84],
+      "sources": [{ "path": "agents/omz-reviewer.md", "label": "只读评审门" }]
+    },
+    {
+      "id": "explore",
+      "type": "backend",
+      "label": "内置 Explore",
+      "sublabel": "引擎自带扫库",
+      "tag": "复用引擎能力",
+      "pos": [60, 250],
+      "size": [200, 92]
+    },
+    {
+      "id": "main",
+      "type": "backend",
+      "label": "主 agent（Sisyphus）",
+      "sublabel": "只编排与验证",
+      "tag": "core",
+      "pos": [390, 250],
+      "size": [230, 92],
+      "sources": [{ "path": "commands/ulw.md", "label": "八步生命周期" }]
+    },
+    {
+      "id": "gui",
+      "type": "frontend",
+      "label": "ZCode GUI 面板",
+      "sublabel": "宿主原生，默认入口",
+      "tag": "core",
+      "pos": [730, 70],
+      "size": [210, 84]
+    },
+    {
+      "id": "dash",
+      "type": "frontend",
+      "label": "loopback dashboard",
+      "sublabel": "HTTP + SSE 只读",
+      "tag": "dashboard · 默认关闭",
+      "pos": [1090, 70],
+      "size": [210, 84],
+      "sources": [{ "path": "dashboard/server.mjs", "label": "全 GET 接口面" }]
+    },
+    {
+      "id": "coord",
+      "type": "backend",
+      "label": "coordinator MCP",
+      "sublabel": "stdio · 13 个工具",
+      "tag": "orchestration · 默认关闭",
+      "pos": [730, 250],
+      "size": [210, 92],
+      "sources": [{ "path": "mcp/coordinator/server.mjs", "label": "MCP 入口" }]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite WAL",
+      "sublabel": "DAG · 租约 · mailbox",
+      "tag": "唯一事实源",
+      "pos": [1090, 250],
+      "size": [210, 92],
+      "sources": [{ "path": "mcp/coordinator/schema.sql", "label": "7 态 schema" }]
+    },
+    {
+      "id": "cg",
+      "type": "external",
+      "label": "CodeGraph MCP",
+      "sublabel": "上游 1.6.0",
+      "tag": "graph · 默认关闭",
+      "pos": [730, 410],
+      "size": [210, 92]
+    },
+    {
+      "id": "cgidx",
+      "type": "database",
+      "label": ".codegraph/ 索引",
+      "sublabel": "per-project 本地库",
+      "tag": "I1 陈旧闸",
+      "pos": [1090, 410],
+      "size": [210, 92],
+      "sources": [{ "path": "adapters/zcode/capability.mjs", "label": "probeCodegraph" }]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "展示层 · 只读投影",
+      "wraps": ["gui", "dash"]
+    },
+    {
+      "kind": "region",
+      "label": "执行层 · 子代理不可再 spawn",
+      "wraps": ["state", "agents", "explore", "main"]
+    },
+    {
+      "kind": "region",
+      "label": "调度层 · 不伪装官方 Team API",
+      "wraps": ["coord", "sqlite"]
+    },
+    {
+      "kind": "region",
+      "label": "语义层 · 直接接入上游 CodeGraph MCP",
+      "wraps": ["cg", "cgidx"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "main-spawn",
+      "from": "main",
+      "to": "agents",
+      "label": "Agent 工具 spawn",
+      "variant": "emphasis"
+    },
+    {
+      "id": "agents-state",
+      "from": "agents",
+      "to": "state",
+      "label": "results JSON"
+    },
+    {
+      "id": "main-explore",
+      "from": "main",
+      "to": "explore",
+      "label": "回退目标",
+      "variant": "dashed"
+    },
+    {
+      "id": "agents-gui",
+      "from": "agents",
+      "to": "gui",
+      "label": "agent 状态"
+    },
+    {
+      "id": "main-coord",
+      "from": "main",
+      "to": "coord",
+      "label": "任务 DAG",
+      "variant": "dashed"
+    },
+    {
+      "id": "coord-sqlite",
+      "from": "coord",
+      "to": "sqlite",
+      "label": "原子 claim",
+      "variant": "emphasis"
+    },
+    {
+      "id": "dash-coord",
+      "from": "dash",
+      "to": "coord",
+      "label": "只读状态 API",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [[1195, 200], [835, 200]]
+    },
+    {
+      "id": "main-cg",
+      "from": "main",
+      "to": "cg",
+      "label": "codegraph_explore",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [[505, 456]]
+    },
+    {
+      "id": "cg-index",
+      "from": "cg",
+      "to": "cgidx",
+      "label": "新鲜度校验"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "core · 默认启用",
+      "items": [
+        "原生 agents / commands / skills + 主 agent 编排",
+        "普通聊天不写 .omz/、不建 team、不起任何服务",
+        "装 OMZ 不改变 ZCode 默认聊天行为"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "可选 profile · 默认全关",
+      "items": [
+        "graph：装 codegraph，再在目标项目 codegraph init",
+        "orchestration：mcpServers.omz-coordinator.enabled → true",
+        "dashboard：.zcode/config.json 的 omz.dashboard.enabled"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "关掉某层之后的回退",
+      "items": [
+        "graph：内置 Explore + Bash grep（无 Grep/Glob 工具）",
+        "orchestration：波次状态落 .omz/runtime/ 文件",
+        "dashboard：ZCode GUI 任务面板 + /omz-status"
+      ]
+    }
+  ]
+}

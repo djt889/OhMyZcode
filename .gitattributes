@@ -2,3 +2,9 @@
 *.png binary
 *.jpg binary
 *.sqlite binary
+
+# 交付产物按字节保真：archify 的 deliver 会给出 artifact 的 sha256，
+# 若让 text=auto 把 CRLF 规范化成 LF，clone 出来的字节就与那个 sha 不符，
+# 收据也就失去了核对价值。这两个文件不参与人工编辑，无需行尾规范化。
+docs/omz-architecture.html -text
+docs/omz-architecture.zh-CN.html -text

@@ -4,8 +4,8 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.6.0** ↔
-DESIGN **v1.5** (1.6.0 is a documentation and defect-fix release; it does not change the design spec).
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.6.1** ↔
+DESIGN **v1.5** (1.6.0 and 1.6.1 are documentation and defect-fix releases; neither changes the design spec).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -21,6 +21,49 @@ settled by the 1.5.0 installed-environment acceptance (six items → five).
 Every entry records three things: **Scope** (what was delivered), **Verification** (how it was proven to work, with
 reproducible numbers), and **Known gaps** (what was still missing at the time). All numbers are taken from actual run
 output on Node v22.14.0 / Windows on 2026-09-01.
+
+---
+
+## 1.6.1 — A verified four-layer architecture diagram in the README (2026-09-02)
+
+**Scope**
+
+- **A four-layer architecture diagram, one per language, embedded in the top-level READMEs.** Both are generated from a
+  typed [archify](https://github.com/tt-a1i/archify) specification under `docs/`, and each ships as four files: the
+  specification (the only hand-edited one), a self-contained interactive HTML viewer, and light/dark PNG captures of the
+  diagram surface for GitHub to render inline. The READMEs use `<picture>` with `prefers-color-scheme`, so a reader on
+  GitHub's dark theme gets the dark capture.
+  The two languages are **two separate specifications with identical topology**, not one file with translated strings:
+  node sizes and the viewBox are tuned per language because CJK glyphs are twice as wide in the renderer's measurement
+  model, and the viewer's own UI language follows `meta.locale`. Seven components carry `sources` references that point
+  at real files in this repository (the coordinator's MCP entry point and schema, the dashboard's GET-only surface,
+  `probeCodegraph`, the review-gate agent, the eight-step lifecycle command, the status renderer); `deliver` verifies
+  those paths against the repository at the recorded revision rather than trusting the specification.
+- **What the diagram is drawn to say.** The topology is DESIGN §3.1 plus §3.3 in one frame: the execution layer is the
+  only one always present (`core`), and the other three sit behind their own default-off switch with their own fallback.
+  Four guided views walk the default `core` path, DAG scheduling, semantic retrieval, and the three fallback chains.
+- **`docs/README.md` + `docs/README.zh-CN.md`** record how to regenerate the artifacts, why the HTML is the real
+  artifact and the PNGs are only what GitHub can inline, and the verification state of exactly the committed bytes.
+
+**Verification**
+
+For both languages, at the revision recorded in each specification's `meta.repository`: `validate` and `deliver` report
+**9/9 artifact checks** under the `showcase` profile with **0 errors and 0 warnings**, and repository evidence
+**verified** against 7 source references. `visual-check` reports **`status: pass`** — no vertical or horizontal overflow
+at 1440×900, 1600×1000, 1920×1080 or 2048×1320, with the smallest projected node text at **7.6 px** (English) and
+**7.8 px** (Chinese) at the tightest viewport, against a 6 px floor. The rendered light and dark captures were reviewed
+by inspection. Unchanged this round and re-run: `npm test` **573 tests / 102 suites, 0 failures**;
+`node tools/doctor.mjs` **no FAIL**; `node tools/validate-frontmatter.mjs .` passes.
+
+**Known gaps**
+
+- A `showcase` pass is a mechanical claim about **composition and containment** — no edge crosses an unrelated node, no
+  label is masked, nothing overflows a desktop viewport. It says nothing about whether the facts drawn are correct;
+  those remain the responsibility of DESIGN §3.1 and §3.3.
+- The PNGs are captures, so they do not track the specification automatically. Editing a specification without
+  re-running `deliver` and re-capturing leaves the README showing the previous diagram, and nothing in the test suite
+  catches that. The regeneration commands are in `docs/README.md`.
+- The five items of §10.2 that need a real environment (V3/V4/V8′/V10/V11) are untouched by this round.
 
 ---
 
