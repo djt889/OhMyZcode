@@ -2,11 +2,44 @@
 
 # OMZ 实现变更日志
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.5.0** ↔ DESIGN **v1.5**。
+**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.6.0** ↔ DESIGN **v1.5**（1.6.0 是文档与缺陷修复版本，未改动设计规格）。
 
 **跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
 
 每个条目记录三件事：**范围**（交付了什么）、**验证**（怎么证明它工作，用可复现的数字）、**已知缺口**（当时还没有的）。数字均取自 2026-09-01 在 Node v22.14.0 / Windows 上的实际运行输出。
+
+---
+
+## 1.6.0 — 中英双语文档；修 hook 注入预算防线错位（2026-09-02）
+
+**范围**
+
+- **文档双语化。** `README.md`、`CHANGELOG.md`、`DESIGN.md` 与四个模块 README（`mcp/coordinator/`、`dashboard/`、`hooks/`、`upstream/`）全部转为英文主文件——GitHub 默认展示英文、仓库 topics 也是英文——并各配一份 `*.zh-CN.md` 中文对照。中文正文是**原样搬运，不回译**：两次语言往返恰好会磨掉这个项目最依赖的那些承重区分（"代码路径已证实" vs "行为已实测" vs "待装机实测"）。两版首行都有语言切换器，跨文件链接指向对应语言版本。`NOTICE` 采用**单文件双语**——法律性文件拆成两份会引来版本漂移。
+  术语由 8 类不翻译清单（角色名、命令、skill 名、工具与 frontmatter 字段、MCP 工具名、路径、引擎符号、模板变量，以及 `B<n>`/`I<n>`/`V<n>`/`§` 编号）加 60 条固定译法约束。交叉引用做了程序化比对：469 处 `§` 引用（去重 44 个）、`B1`–`B30`、`I1`–`I10`、`V1`–`V12`——中英计数完全一致，零悬空。
+- **修一个真实缺陷：hook 注入预算对错了墙。** 旧的 `MAX_CONTEXT_BYTES = 48 * 1024`（49152）**高于**引擎缺省的 `maxOutputBytes` = **32768**（引擎源码五处取证），而且它量的是 `additionalContext` **字符串**的字节数，引擎量的是 **stdout 上完整的 JSON 负载**（实测差 267 字节，中文越多差得越大）。两重错位叠加。
+  注入体落在 32768–49152 之间时，后果比"截断成半截 JSON"更糟：`OutputCollector.append()` 在 `inlineBytes >= maxInlineBytes` 之后丢弃余下 chunk（只置一个 hook 路径从不读的 `truncated` 标记），随后 `parseHookStdout()` 对半截报文执行 `try{JSON.parse(r)}catch{return}` 返回 `undefined`。**整段注入静默消失**——没有 kill、没有非零退出码、没有报错，只有"hook 好像没生效"。此前记录的 `o.kill()` 那条路径属于 `runGitCommand()`，不在 hook 执行链上；hook 走的是 executionPort 的 `outputLimit`。
+- **修法。** 新增 `ENGINE_DEFAULT_MAX_OUTPUT_BYTES = 32768` 并把引擎取证写进注释；判定改为以 `payloadBytes(text) = Buffer.byteLength(JSON.stringify({ additionalContext }), 'utf8')` 为准；预算设为 `MAX_PAYLOAD_BYTES = 24576`（32768 − 8192，留 25% 余量，因为用户或工作区配置可能把 `maxOutputBytes` 调得**更小**而我们拿不到那个值）；降级从两级扩为三级（`full` → `headings` → `minimal`）并加 `fitToPayload()` 硬裁兜底，使**不存在"降级了但仍超限"的路径**；头窗大小用**对实测负载做二分**求得，而不是线性回减——转义密集的输入下线性回减会一次把头窗砍到 0，白扔掉本来放得下的空间。`MAX_CONTEXT_BYTES` 保留为派生参考量（`MAX_PAYLOAD_BYTES - 24`），**不再参与任何判定**——JSON 转义下单个字符可放大到 6 字节，任何字符串侧阈值都可能再次失准。
+
+**四项收尾**
+
+- `tests/cli.test.mjs`：那句"本仓库当前状态下上游许可证未核验"已经过期。许可证已核验；`doctor --supply-chain` 的 `exit 1` 唯一来源是未装 codegraph 机器上的 `supply:codegraph`。注释改为写明这些用例实际断言的四条与环境无关的不变量，装了 codegraph 也不会变红。
+- `checkRequestTarget()` 有实现却**零断言**——是 I5 清单里唯一这样的项（全仓搜只命中 `server.mjs` 自身，把函数体改成 `return true` 没有任何用例变红）。补了两级共 9 例：纯函数级 5 例，加上用 `net.connect` 手写请求行的真实 socket 级 4 例——因为 `node:http` 客户端只发 origin-form，根本构造不出 absolute-form。
+- 上游许可证判据提取为共享函数 `tools/lib/license-gate.mjs`。此前 `doctor.mjs` 要求四个字段，而 `sync-omo-skills.mjs` 只要求 `status` 非空且不以 `unverified` 开头——`status: "pending"` 在那侧静默通过。**现在判断同源，严重度按调用方职责分化**：`doctor --supply-chain` 是发布门判 FAIL，`sync --check` 是同步前提示判 WARN。已知边界写在模块头：把 `spdx` 写成 `"MIT-typo"` 同时补齐其余三项仍会评为 `ok`，因为四项齐备只证明有可复核的取证痕迹，不证明值本身正确。
+- I5 防护计数：代码侧保留自己的七条切分（`server.mjs` 里端口与 token 确实是两段独立逻辑），但显式注明与 DESIGN 六道切分的差异在哪，以及原来的第七道 preload 已随组件一并撤下。
+
+**验证**
+
+`npm test` **572 tests / 102 suites，0 失败**（本轮之前是 557/101：`checkRequestTarget` +9，注入预算 +15 落在新增的"注入负载预算与降级" suite）；`node hooks/keyword-detect.mjs --self-test` **30/30**（+3 覆盖 `full` / `headings` / `minimal`）；`node tools/doctor.mjs` **无 FAIL**；`node tools/validate-frontmatter.mjs .` 通过。
+
+新增断言钉的是不变量而不是当前数字：预算 + 余量 ≤ 引擎缺省；三个 mode 的负载都在预算内；三级降级各有自己的负载上界；`ulw.md` 回归哨兵（负载在预算内**且余量 > 1.5x**，所以它再膨胀会先撞测试而不是撞引擎）；以及 5MB 输入的降级挂钟哨兵（< 1500ms——二分每步要对前缀做一次 `JSON.stringify`，而被超时杀掉是零字节输出，比降级失败更糟）。
+
+两次变异验证确认新测试有牙：把预算改回 49152 → **3 条红**（含 `预算(49152) + 余量(8192) 必须 <= 引擎缺省(32768)`）；删掉二级降级 → **3 条红**（含 `预算 24 下返回的负载 82865（level=headings）越界`）。
+
+`ulw.md` 本轮实测：文件 11175 字节，剥 frontmatter 后正文 **11018**（`stripFrontmatter` 还会吃掉一个前导换行，所以此前记的 11019 差 1），`additionalContext` 11105，**JSON 负载 11372**——对 24576 预算是 2.16x 余量，对引擎缺省是 2.88x。
+
+**已知缺口**
+
+与 1.5.0 相同：五项待真实环境验证（V3 / V4 / V8′ / V10 / V11），各有回退路径，没有一项在 `core` 主路径上。本轮有意保留一项：`keyword_hook` 关闭时 hook 仍会每条消息启一次 node 进程（约 126–132ms）——要消除它得在项目或用户配置层禁用插件 hook，而不是改插件自己的 `hooks.json`。
 
 ---
 

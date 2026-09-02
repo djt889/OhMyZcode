@@ -4,8 +4,8 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.5.0** ↔
-DESIGN **v1.5**.
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.6.0** ↔
+DESIGN **v1.5** (1.6.0 is a documentation and defect-fix release; it does not change the design spec).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -21,6 +21,96 @@ settled by the 1.5.0 installed-environment acceptance (six items → five).
 Every entry records three things: **Scope** (what was delivered), **Verification** (how it was proven to work, with
 reproducible numbers), and **Known gaps** (what was still missing at the time). All numbers are taken from actual run
 output on Node v22.14.0 / Windows on 2026-09-01.
+
+---
+
+## 1.6.0 — Bilingual documentation; fixed the hook injection budget misalignment (2026-09-02)
+
+**Scope**
+
+- **Bilingual documentation.** `README.md`, `CHANGELOG.md`, `DESIGN.md` and the four module READMEs
+  (`mcp/coordinator/`, `dashboard/`, `hooks/`, `upstream/`) become English primary files — that is what GitHub shows
+  by default and the repository topics are English too — each with a matching `*.zh-CN.md` Chinese counterpart. The
+  Chinese bodies are the original text carried over **verbatim, not back-translated**: a round trip through two
+  languages loses precisely the load-bearing distinctions this project depends on ("the code path is confirmed" vs
+  "behavior has been measured" vs "pending empirical verification"). Both versions carry a language switcher on line 1
+  and cross-file links point at the matching language. `NOTICE` is bilingual **inside one file** — splitting a legal
+  notice across two files invites version drift.
+  Terminology is constrained by an 8-category do-not-translate list (role names, commands, skill names, tool and
+  frontmatter fields, MCP tool names, paths, engine symbols, template variables, and the `B<n>`/`I<n>`/`V<n>`/`§`
+  numbering) plus 60 fixed translations. Cross-reference parity was checked programmatically: 469 `§` references
+  (44 distinct), `B1`–`B30`, `I1`–`I10`, `V1`–`V12` — identical counts in both versions, zero dangling.
+- **Fixed a real defect: the hook injection budget was aimed at the wrong wall.** The old
+  `MAX_CONTEXT_BYTES = 48 * 1024` (49152) sat **above** the engine's default `maxOutputBytes` of **32768** (five places
+  of evidence in the engine source), and it measured the byte length of the `additionalContext` **string** while the
+  engine measures the **complete JSON payload on stdout** (measured difference: 267 bytes, and the gap widens the more
+  CJK text there is). Two misalignments stacked.
+  The consequence for an injection body landing between 32768 and 49152 is worse than a truncated JSON:
+  `OutputCollector.append()` drops the remaining chunks once `inlineBytes >= maxInlineBytes` (setting only a
+  `truncated` flag that the hook path never reads), and `parseHookStdout()` then runs `try{JSON.parse(r)}catch{return}`
+  on the half message, returning `undefined`. **The whole injection disappears silently** — no kill, no non-zero exit
+  code, no error, only "the hook doesn't seem to have fired". The `o.kill()` path noted earlier belongs to
+  `runGitCommand()`, not to the hook execution chain; hooks go through the executionPort's `outputLimit`.
+- **The fix.** Added `ENGINE_DEFAULT_MAX_OUTPUT_BYTES = 32768` with the engine evidence in a comment; moved the
+  decision onto `payloadBytes(text) = Buffer.byteLength(JSON.stringify({ additionalContext }), 'utf8')`; set the budget
+  to `MAX_PAYLOAD_BYTES = 24576` (32768 − 8192, a 25% margin, because user or workspace configuration can set
+  `maxOutputBytes` **lower** and we cannot read that value); extended the degradation from two levels to three
+  (`full` → `headings` → `minimal`) with a `fitToPayload()` hard-trim backstop so **no path can end in "degraded but
+  still over the limit"**; and the head-window size is found by **binary search over measured payload** rather than
+  linear back-off, because under escape-dense input linear back-off cuts the window to zero in one step and throws away
+  space that would have fit. `MAX_CONTEXT_BYTES` is kept as a derived reference value (`MAX_PAYLOAD_BYTES - 24`) that
+  **no longer participates in any decision** — under JSON escaping one character can expand to 6 bytes, so any
+  string-side threshold can drift out of alignment again.
+
+**Four loose ends closed**
+
+- `tests/cli.test.mjs`: the comment claiming "the upstream license is unverified in the current repository state" was
+  stale. The license is verified; the only source of `exit 1` from `doctor --supply-chain` is `supply:codegraph` on a
+  machine without codegraph. The comment now states the four environment-independent invariants those cases actually
+  assert, so installing codegraph will not turn them red.
+- `checkRequestTarget()` had an implementation and **zero assertions** — the only such item on the I5 list (a
+  whole-repo search hit `server.mjs` alone; changing the body to `return true` turned nothing red). Added 9 cases on
+  two levels: 5 pure-function cases, plus 4 real-socket cases using `net.connect` to hand-write the request line,
+  because the `node:http` client only ever emits origin-form and cannot construct absolute-form at all.
+- The upstream-license criterion is now a shared function, `tools/lib/license-gate.mjs`. Previously `doctor.mjs`
+  required four fields while `sync-omo-skills.mjs` only required a non-empty `status` not starting with `unverified` —
+  `status: "pending"` passed silently there. **The judgement is now shared; the severity stays differentiated by the
+  caller's role**: `doctor --supply-chain` is a release gate and reports FAIL, `sync --check` is a pre-sync notice and
+  reports WARN. The known limit is documented in the module header: writing `spdx: "MIT-typo"` with the other three
+  fields filled in still evaluates to `ok`, because four fields present only proves there is a re-checkable evidence
+  trail, not that the value itself is right.
+- I5 protection counting: the code side keeps its own seven-way split (port and token are two independent pieces of
+  logic in `server.mjs`) but now states explicitly where it differs from DESIGN's six-way split, and that the original
+  seventh — preload — was withdrawn along with the component.
+
+**Verification**
+
+`npm test` **572 tests / 102 suites, 0 failures** (557/101 before this round: `checkRequestTarget` +9,
+injection-budget +15 in a new "injection payload budget and degradation" suite);
+`node hooks/keyword-detect.mjs --self-test` **30/30** (+3 covering `full` / `headings` / `minimal`);
+`node tools/doctor.mjs` **no FAIL**; `node tools/validate-frontmatter.mjs .` passes.
+
+New assertions pin the invariants rather than the current numbers: budget + margin ≤ engine default; the payload of all
+three modes is under budget; each degradation level has its own payload upper bound; a `ulw.md` regression sentinel
+(payload under budget **with more than 1.5x headroom**, so further growth hits the test before it hits the engine); and
+a wall-clock sentinel for degradation on 5MB input (< 1500ms — the binary search costs one `JSON.stringify` of the
+prefix per step, and being killed on timeout produces zero output, which is worse than a failed degradation).
+
+Two mutation checks confirm the new tests have teeth: setting the budget back to 49152 turns **3 red** (including
+`budget(49152) + margin(8192) must be <= engine default(32768)`); removing the second degradation level turns **3 red**
+(including `payload 82865 returned under budget 24 (level=headings) is out of bounds`).
+
+Measured `ulw.md` figures for this round: file 11175 bytes, body after stripping frontmatter **11018**
+(`stripFrontmatter` also eats one leading newline, so the 11019 recorded earlier was off by one),
+`additionalContext` 11105, **JSON payload 11372** — 2.16x headroom against the 24576 budget, 2.88x against the engine
+default.
+
+**Known gaps**
+
+Unchanged from 1.5.0: five items pending verification in a real environment (V3 / V4 / V8′ / V10 / V11), each with a
+fallback path and none of them on the `core` path. One item is left in place deliberately: when `keyword_hook` is off
+the hook still starts a node process per message (about 126–132ms) — eliminating that requires disabling the plugin
+hook at the project or user configuration layer, not editing the plugin's own `hooks.json`.
 
 ---
 

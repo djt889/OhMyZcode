@@ -1,6 +1,6 @@
 {
   "name": "omz",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Oh My ZCode — OmO (oh-my-openagent) orchestration capabilities ported to ZCode",
   "type": "module",
   "license": "MIT",

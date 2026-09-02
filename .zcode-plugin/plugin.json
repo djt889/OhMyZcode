@@ -1,6 +1,6 @@
 {
   "name": "omz",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Oh My ZCode — OmO 编排能力的 ZCode 移植：core（agents/commands/skills）+ 可选 graph/orchestration/dashboard profile",
   "author": {
     "name": "OMZ"
