@@ -619,15 +619,30 @@ describe('跨文件契约一致性', () => {
   });
 
   /**
-   * 引擎的 readMarkdownFrontmatter 只取 name/description 两键；缺 name 时命令名回落到文件名。
-   * 显式写 name 才能让「命令名」与「文件名」解耦——重命名文件不会悄悄改掉用户打的命令。
+   * 自定义命令的 frontmatter 有**自己的**白名单（引擎常量 OAo）：
+   *   allowed-tools / argument-hint / description / disable-noninteractive / model / skills
+   * `name` **不在其中**——命令名由 DAo() 从文件相对路径推导（ulw.md → ulw），压根不看 frontmatter。
+   * 所以写 name 既不生效，还每个文件换来一条
+   * `custom_command_unknown_frontmatter: Unknown custom command frontmatter key: name`
+   * （1.7.0 一度写了 name，实测 `zcode commands list --verbose` 打出 5 条 warning，1.7.1 移除）。
+   *
+   * 注意别把这套白名单与**子代理** frontmatter 混淆：agents/*.md 走 parseAgentFrontmatter，
+   * 那边 name 是必需字段。两条路径的允许键完全不同。
    */
-  it('每个 command 都显式声明 name 且与文件名一致', () => {
+  it('command frontmatter 只含引擎白名单内的键（不得写 name）', () => {
+    const allowed = new Set(['allowed-tools', 'argument-hint', 'description', 'disable-noninteractive', 'model', 'skills']);
     for (const file of fs.readdirSync(COMMANDS_DIR).filter((n) => n.endsWith('.md'))) {
-      const fm = parseFrontmatter(readText(path.join(COMMANDS_DIR, file)));
-      const stem = file.replace(/\.md$/, '');
-      assert.equal(typeof fm?.name, 'string', `${file}: 缺 frontmatter name`);
-      assert.equal(fm.name, stem, `${file}: name(${fm.name}) 与文件名不一致`);
+      const text = readText(path.join(COMMANDS_DIR, file));
+      const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      assert.ok(block, `${file}: 缺 frontmatter`);
+      const keys = block[1]
+        .split(/\r?\n/)
+        .map((line) => line.match(/^([\w-]+):/))
+        .filter(Boolean)
+        .map((m) => m[1]);
+      const unknown = keys.filter((k) => !allowed.has(k));
+      assert.deepEqual(unknown, [], `${file}: 这些键会让引擎报 custom_command_unknown_frontmatter：${unknown.join(', ')}`);
+      assert.ok(keys.includes('description'), `${file}: 缺 description`);
     }
   });
 

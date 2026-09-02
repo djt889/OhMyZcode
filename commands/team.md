@@ -1,5 +1,4 @@
 ---
-name: team
 description: "Team Mode：多 worker 并行编排（coordinator MCP 或 core 文件回退）。用法 /team <目标>"
 ---
 

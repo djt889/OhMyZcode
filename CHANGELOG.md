@@ -4,9 +4,9 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.7.0** ↔
-DESIGN **v1.5** (1.6.0, 1.6.1 and 1.7.0 are documentation, packaging and defect-fix releases; none changes the design
-spec).
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.7.1** ↔
+DESIGN **v1.5** (1.6.0, 1.6.1, 1.7.0 and 1.7.1 are documentation, packaging and defect-fix releases; none changes the
+design spec).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -22,6 +22,72 @@ settled by the 1.5.0 installed-environment acceptance (six items → five).
 Every entry records three things: **Scope** (what was delivered), **Verification** (how it was proven to work, with
 reproducible numbers), and **Known gaps** (what was still missing at the time). All numbers are taken from actual run
 output on Node v22.14.0 / Windows on 2026-09-01.
+
+---
+
+## 1.7.1 — Retracting the command `name` field: it was never read, and it produced five warnings (2026-09-03)
+
+**What was wrong**
+
+1.7.0 added `name` to the frontmatter of all five commands, claiming the engine's `readMarkdownFrontmatter` reads it and
+that declaring it decouples the command name from the filename. **Both halves were wrong**, and the change actively made
+the installed state worse.
+
+`readMarkdownFrontmatter` belongs to the **plugin component enumeration** path. Custom commands go through a different
+loader with its own allowlist (engine constant `OAo`):
+
+```
+allowed-tools · argument-hint · description · disable-noninteractive · model · skills
+```
+
+`name` is not in it. The command name comes from `DAo()`, which derives it from the file path relative to the command
+root (`ulw.md` → `ulw`) and never looks at frontmatter at all. So the field could not decouple anything, and every key
+outside that allowlist produces one warning:
+
+```
+[warning] custom_command_unknown_frontmatter: Unknown custom command frontmatter key: name   (×5)
+```
+
+The irony is that 1.7.0's headline was "a diagnostic-free install". It **was** clean on the surface I checked
+(`zcode plugins list --verbose`) and dirty on the one I did not (`zcode commands list --verbose`). Verifying one
+diagnostic surface and generalizing to "zero diagnostics" is the actual mistake here; the wrong field was a symptom.
+
+**Scope**
+
+- The `name` key is removed from all five commands. Command names are unchanged (`/ulw`, `/team`, `/hyperplan`,
+  `/omz-status`, `/omz-doctor`) because they were always derived from the filenames.
+- The test assertion is replaced with the correct invariant: **command frontmatter may only contain keys inside the
+  engine's allowlist**, and `description` must be present. That is strictly stronger than the retracted one — it catches
+  any future stray key, not just `name`. Its docstring also records the trap: agent frontmatter (`agents/*.md`, via
+  `parseAgentFrontmatter`) *does* require `name`; the two paths have completely different allowed keys.
+- **Fixed a flaky test found while verifying this release: eleven timing assertions measured wall clock.** A full run
+  came back 576/1 once and then would not reproduce across ten retries. That run took 36772 ms against a 21500 ms norm
+  — 70% slower — which pointed at machine contention rather than a code defect. Reproduced deliberately with 24
+  spinning workers on 16 cores: the 5 MB degradation path goes from `wall=708ms cpu=718ms` when idle to
+  `wall=4976–5673ms cpu=953–1062ms` under load. **Wall clock inflates 4–8×, CPU time barely moves**, and what these
+  assertions exist to catch is algorithmic regression (CPU-bound), not scheduling delay. All eleven now measure
+  `process.cpuUsage()` instead, keeping their original limits. Verified by re-running the whole suite three times under
+  the same 24-worker load that produced the red: 0 failures each time, including one run that took 140 s of wall clock.
+
+**Verification**
+
+`npm test` **577 tests / 102 suites, 0 failures** (count unchanged: one assertion replaced, not added).
+Mutation-tested with a deliberate control: adding `name` back → **red**; adding a different non-allowlist key
+(`title`) → **red**; deleting `description` → **red**; adding the *legal* allowlist key `model` → **green**. That last
+one matters — without it, an assertion that rejects every key would look identical to a correct one.
+
+Engine-level, on this exact tree: `zcode commands list --verbose` reports **zero diagnostics** (was 5 warnings), all 5
+commands still listed; `zcode plugins list --verbose` still reports zero warnings for `omz`.
+
+**On marketplace review, since it is the natural question**
+
+This never affected any marketplace gate, and I checked rather than assumed. Both plugin-facing validation endpoints
+were called against the installed 1.7.0: `plugins/validate` → **0 diagnostics**, `plugins/describe` → **0 diagnostics**
+(while correctly enumerating 9 agents, 5 commands, 4 skills, 1 hook, 1 MCP server). Command frontmatter warnings live
+in the *command discovery* diagnostic stream, which the plugin validation path does not consume. The
+`claude-plugins-official` policy is likewise unaffected — its criteria are hooks scope, telemetry, credential access,
+downloaded software and description honesty; frontmatter keys are not among them. That policy's one blocking finding
+for OMZ remains the ungated `UserPromptSubmit` hook, unchanged by this release.
 
 ---
 
@@ -56,9 +122,7 @@ output on Node v22.14.0 / Windows on 2026-09-01.
   `homepage`, `author.url`, `examplePrompts` and `examplePrompts_i18n` — the fields the engine's `Cee()` actually
   reads into a plugin card. The listing states up front that OMZ registers one `UserPromptSubmit` hook whose
   injection is gated off by default, because a user reading only the card should not be surprised by a hook.
-- **Five commands now declare `name` explicitly.** The engine's `readMarkdownFrontmatter` reads only `name` and
-  `description`, falling back to the filename when `name` is absent. Declaring it decouples the command name from the
-  filename, so renaming a file cannot silently change what users type.
+- **Five commands now declare `name` explicitly.** *(Retracted in 1.7.1 — this was wrong. See that entry.)*
 - **`ulw-execute`'s skill description: 204 → 103 characters**, keeping the strict activation clause. Skill
   descriptions sit in the discovery context permanently; this one was carrying the `/ulw` step number and the Atlas
   session mention, neither of which affects whether the skill should activate.
@@ -70,7 +134,8 @@ output on Node v22.14.0 / Windows on 2026-09-01.
 immediately, each turning the suite red exactly once: re-adding `agents` to the manifest; re-adding the `hooks`
 declaration; a marketplace entry version that disagrees with `plugin.json`; `source: "git"` instead of `"github"`;
 `ref: "main"` instead of the tag; deleting a command's `name`; a command `name` that disagrees with its filename.
-Baseline and post-restore both `fail=0`.
+Baseline and post-restore both `fail=0`. *(The last two mutations belonged to the retracted `name` assertion; 1.7.1
+replaces them.)*
 
 Engine-level verification, run against this exact tree: `zcode plugins list --verbose` reports **no warning and no
 error** for `omz` while still reporting `skills: 4, commands: 1, hooks: 1, mcp: plugin:omz:omz-coordinator`;

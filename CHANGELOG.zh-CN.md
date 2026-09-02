@@ -2,11 +2,49 @@
 
 # OMZ 实现变更日志
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.7.0** ↔ DESIGN **v1.5**（1.6.0、1.6.1、1.7.0 都是文档、打包与缺陷修复版本，均未改动设计规格）。
+**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.7.1** ↔ DESIGN **v1.5**（1.6.0、1.6.1、1.7.0、1.7.1 都是文档、打包与缺陷修复版本，均未改动设计规格）。
 
 **跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
 
 每个条目记录三件事：**范围**（交付了什么）、**验证**（怎么证明它工作，用可复现的数字）、**已知缺口**（当时还没有的）。数字均取自 2026-09-01 在 Node v22.14.0 / Windows 上的实际运行输出。
+
+---
+
+## 1.7.1 — 撤回命令的 `name` 字段：它从未被读取，却制造了五条 warning（2026-09-03）
+
+**错在哪**
+
+1.7.0 给五个命令的 frontmatter 都加了 `name`，理由写的是「引擎的 `readMarkdownFrontmatter` 会读它，显式声明可把命令名与文件名解耦」。**这两半都错了**，而且这个改动实际让装机状态变差了。
+
+`readMarkdownFrontmatter` 属于**插件组件枚举**那条路径。自定义命令走的是另一个加载器，它有自己的白名单（引擎常量 `OAo`）：
+
+```
+allowed-tools · argument-hint · description · disable-noninteractive · model · skills
+```
+
+`name` 不在里面。命令名来自 `DAo()`——从文件相对命令根目录的路径推导（`ulw.md` → `ulw`），**压根不看 frontmatter**。所以这个字段解不了任何耦，而白名单外的每个键都换来一条 warning：
+
+```
+[warning] custom_command_unknown_frontmatter: Unknown custom command frontmatter key: name   ×5
+```
+
+讽刺的是 1.7.0 的标题正是「装机零诊断」。它在**我查过的那个面**（`zcode plugins list --verbose`）确实干净，在**我没查的那个面**（`zcode commands list --verbose`）脏了。真正的错误是「只验证了一个诊断面就推广成零诊断」；写错字段只是它的症状。
+
+**范围**
+
+- 五个命令的 `name` 键全部移除。命令名不变（`/ulw`、`/team`、`/hyperplan`、`/omz-status`、`/omz-doctor`），因为它们一直是从文件名推导的。
+- 测试断言换成正确的不变量：**命令 frontmatter 只允许引擎白名单内的键**，且 `description` 必须存在。这比被撤回那条严格得多——它能拦住将来任何一个乱入的键，不只是 `name`。docstring 里也记下了这个坑：子代理 frontmatter（`agents/*.md`，走 `parseAgentFrontmatter`）**确实**要求 `name`；两条路径的允许键完全不同。
+- **顺手修掉一个在验证本版时撞见的 flaky 测试：十一条计时断言量的是墙钟。** 有一次全量跑回来 576/1，随后十次重跑都复现不出来。那一次总耗时 36772ms 对常态 21500ms——慢 70%，指向机器争抢而非代码缺陷。用 24 个占满核的 worker 抢 16 核刻意复现：5MB 降级路径从空闲的 `wall=708ms cpu=718ms` 变成负载下的 `wall=4976–5673ms cpu=953–1062ms`。**墙钟膨胀 4–8 倍，CPU 时间几乎不动**，而这些断言存在的目的是抓算法退化（CPU 密集），不是调度延迟。十一条全部改量 `process.cpuUsage()`，上界保持原值。验证方式是在制造出那次红的同一个 24-worker 负载下把整套重跑三次：每次 0 失败，其中一次墙钟耗时 140 秒。
+
+**验证**
+
+`npm test` **577 tests / 102 suites，0 失败**（数量不变：替换一条断言，不是新增）。变异测试带了一个刻意的对照组：把 `name` 加回去 → **红**；加一个别的非白名单键（`title`）→ **红**；删掉 `description` → **红**；加**合法**白名单键 `model` → **绿**。最后这条很关键——没有它，「拒绝一切键」的错断言看起来会跟正确断言一模一样。
+
+引擎层，针对当前这棵树：`zcode commands list --verbose` 报**零诊断**（此前 5 条 warning），5 个命令照旧全在；`zcode plugins list --verbose` 对 `omz` 仍是零 warning。
+
+**关于市场审核，这是自然会问的问题**
+
+它从未影响任何市场门，而且我是查了不是猜的。两个面向插件的校验端点都对装好的 1.7.0 实际调用过：`plugins/validate` → **0 条诊断**，`plugins/describe` → **0 条诊断**（同时正确枚举出 9 agents / 5 commands / 4 skills / 1 hook / 1 MCP server）。命令 frontmatter 的 warning 属于**命令发现**那条诊断流，插件校验路径不消费它。`claude-plugins-official` 的策略同样不受影响——它的判据是 hook 作用域、遥测、凭据访问、下载软件、描述诚实度，frontmatter 键不在其中。该策略对 OMZ 唯一的阻断项仍是那个未设项目闸的 `UserPromptSubmit` hook，本版未触碰。
 
 ---
 
@@ -21,12 +59,12 @@
   2. `"hooks": "hooks/hooks.json"` → `plugin_hook_invalid: Duplicate plugin hooks file ignored`。`listPluginHookSources` **先自动发现这个确切路径**，再读清单键；realpath 相同时第二条被当重复项丢弃。真正生效的一直是自动发现那条。
   两处删除都有测试钉住，回不来。
 - **市场展示元数据。** `displayName`、`displayName_i18n`、`description_i18n`、`category`、`tags`、`homepage`、`author.url`、`examplePrompts`、`examplePrompts_i18n`——引擎的 `Cee()` 实际读进插件卡片的那些字段。卡片文案开门见山写明 OMZ 会注册一个 `UserPromptSubmit` hook 且其注入默认关闭，因为只看卡片的用户不该被一个 hook 惊到。
-- **5 个命令显式声明 `name`。** 引擎的 `readMarkdownFrontmatter` 只取 `name` 与 `description`，缺 `name` 就回落到文件名。显式写它把「命令名」与「文件名」解耦，重命名文件不会悄悄改掉用户打的命令。
+- **5 个命令显式声明 `name`。** *（1.7.1 已撤回——这条是错的，见该条目。）*
 - **`ulw-execute` 的 skill description：204 → 103 字符**，严格触发从句保留。skill description 是长期占着发现上下文的；这条原来带着 `/ulw` 的步骤序号与 Atlas 会话提法，两者都不影响「该不该激活」。
 
 **验证**
 
-`npm test` **577 tests / 102 suites，0 失败**（此前 573：新增四条跨文件契约断言）。**做了变异测试，因为四条绿断言本身不证明任何事**——七个变异，每个立刻还原，每个都恰好让套件变红一次：清单加回 `agents`；加回 `hooks` 声明；市场条目版本与 `plugin.json` 不一致；`source` 改 `"git"`；`ref` 改 `"main"`；删掉某命令的 `name`；命令 `name` 与文件名不一致。基线与还原后均 `fail=0`。
+`npm test` **577 tests / 102 suites，0 失败**（此前 573：新增四条跨文件契约断言）。**做了变异测试，因为四条绿断言本身不证明任何事**——七个变异，每个立刻还原，每个都恰好让套件变红一次：清单加回 `agents`；加回 `hooks` 声明；市场条目版本与 `plugin.json` 不一致；`source` 改 `"git"`；`ref` 改 `"main"`；删掉某命令的 `name`；命令 `name` 与文件名不一致。基线与还原后均 `fail=0`。*（最后两个变异属于已撤回的 `name` 断言，1.7.1 已替换。）*
 
 引擎层验证，针对当前这棵树实跑：`zcode plugins list --verbose` 对 `omz` **零 warning 零 error**，同时仍报 `skills: 4, commands: 1, hooks: 1, mcp: plugin:omz:omz-coordinator`；`zcode commands list` 仍列出全部 5 个命令；`zcode skills list` 仍以命名空间名与裸别名两种形式列出全部 4 个 skill。所以删掉那两个清单键没有损失任何能力。`node tools/doctor.mjs` 无 FAIL，`node tools/validate-frontmatter.mjs .` 通过，`hook:self-test` 30/30。
 

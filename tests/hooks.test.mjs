@@ -185,11 +185,24 @@ describe('detectMode 边界输入', () => {
 describe('detectMode ReDoS 预算', () => {
   const WALL_LIMIT_MS = 1500;
 
-  /** 跑一次 detectMode 并返回 { ms, result }。 */
+  /**
+   * 跑一次 detectMode，返回 { ms, cpuMs, result }。
+   *
+   * 断言量 **cpuMs 而不是墙钟**：这两个数在机器繁忙时会分道扬镳，而我们要防的是
+   * 算法回溯（CPU 密集），不是调度延迟。实测同一段 5MB 降级：空闲 wall=708ms/cpu=718ms，
+   * 24 个占满核的 worker 抢 16 核时 wall 涨到 4976–5673ms 而 cpu 只到 953–1062ms。
+   * 墙钟断言在这种情况下会假红——本仓库确实撞到过一次（577 里 1 条红，
+   * 那次 npm test 总耗时 36772ms 对常态 21500ms，慢 70%）。
+   * cpuMs 也不是完全不受影响（缓存与 SMT 争抢会让同样的工作多烧一点 CPU），
+   * 所以上界仍留了两倍余量，只是它不再随「机器上还跑着什么」而线性漂移。
+   */
   function timed(prompt, options) {
+    const c0 = process.cpuUsage();
     const t0 = Date.now();
     const result = detectMode(prompt, options);
-    return { ms: Date.now() - t0, result };
+    const wall = Date.now() - t0;
+    const used = process.cpuUsage(c0);
+    return { ms: wall, cpuMs: Math.round((used.user + used.system) / 1000), result };
   }
 
   it('SCAN_BUDGET_MS 是 1500ms（相对 hooks.json 的 timeoutMs=3000 留一半余量）', () => {
@@ -204,40 +217,40 @@ describe('detectMode ReDoS 预算', () => {
   });
 
   it('Markdown 链接退化输入 32000×2 在 1500ms 内返回（历史 18.4s 的那个形态）', () => {
-    const { ms, result } = timed('['.repeat(32000) + ']('.repeat(32000));
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过 ${WALL_LIMIT_MS}ms 上界（灾难性回溯复发）`);
+    const { cpuMs, result } = timed('['.repeat(32000) + ']('.repeat(32000));
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过 ${WALL_LIMIT_MS}ms 上界（灾难性回溯复发）`);
     assert.equal(result.mode, null);
   });
 
   it('未闭合三反引号 + 60KB 正文在 1500ms 内返回', () => {
-    const { ms, result } = timed('```\n' + 'x'.repeat(60000) + '\nteam');
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过上界`);
+    const { cpuMs, result } = timed('```\n' + 'x'.repeat(60000) + '\nteam');
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过上界`);
     assert.equal(typeof result.reason, 'string');
   });
 
   it('两万个行内反引号对在 1500ms 内返回', () => {
-    const { ms } = timed('`a`'.repeat(20000));
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过上界`);
+    const { cpuMs } = timed('`a`'.repeat(20000));
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过上界`);
   });
 
   it('链接+反引号+引号+路径 token 混排（最坏形态）在 1500ms 内返回', () => {
-    const { ms } = timed('[a](b) `c` "d" src/x.ts '.repeat(4000));
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过上界`);
+    const { cpuMs } = timed('[a](b) `c` "d" src/x.ts '.repeat(4000));
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过上界`);
   });
 
   it('四万个未配对双引号在 1500ms 内返回', () => {
-    const { ms } = timed('"'.repeat(40000) + ' team');
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过上界`);
+    const { cpuMs } = timed('"'.repeat(40000) + ' team');
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过上界`);
   });
 
   it('未闭合 ~~~ 块与嵌套引号混排在 1500ms 内返回', () => {
-    const { ms } = timed('~~~\n' + '“ulw” \'team\' "hyperplan" '.repeat(3000));
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过上界`);
+    const { cpuMs } = timed('~~~\n' + '“ulw” \'team\' "hyperplan" '.repeat(3000));
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过上界`);
   });
 
   it('1MB 纯文本在 1500ms 内返回（超长输入靠头尾窗切片，不整串扫）', () => {
-    const { ms, result } = timed('x'.repeat(1024 * 1024));
-    assert.ok(ms < WALL_LIMIT_MS, `耗时 ${ms}ms 超过上界`);
+    const { cpuMs, result } = timed('x'.repeat(1024 * 1024));
+    assert.ok(cpuMs < WALL_LIMIT_MS, `CPU 耗时 ${cpuMs}ms 超过上界`);
     assert.equal(result.mode, null);
   });
 
@@ -255,10 +268,11 @@ describe('detectMode ReDoS 预算', () => {
 
   it('maskMarkdownLinks 对退化输入线性返回且保持长度不变', () => {
     const input = '['.repeat(16000) + ']('.repeat(16000);
-    const t0 = Date.now();
+    const c0 = process.cpuUsage();
     const masked = maskMarkdownLinks(input);
-    const ms = Date.now() - t0;
-    assert.ok(ms < WALL_LIMIT_MS, `maskMarkdownLinks 耗时 ${ms}ms 超过上界`);
+    const used = process.cpuUsage(c0);
+    const cpuMs = Math.round((used.user + used.system) / 1000);
+    assert.ok(cpuMs < WALL_LIMIT_MS, `maskMarkdownLinks CPU 耗时 ${cpuMs}ms 超过上界`);
     assert.equal(masked.length, input.length, '屏蔽必须等长（命中点索引要能与原串对照）');
   });
 
@@ -291,13 +305,14 @@ describe('detectMode ReDoS 预算', () => {
 
   it('handleHook 在退化输入下仍在预算内返回且不注入', () => {
     const root = makeRoot(ENABLED);
-    const t0 = Date.now();
+    const c0 = process.cpuUsage();
     const r = handleHook(
       { prompt: '['.repeat(32000) + ']('.repeat(32000), session_id: 's-redos', cwd: root },
       { projectRoot: root, pluginRoot: PLUGIN_ROOT }
     );
-    const ms = Date.now() - t0;
-    assert.ok(ms < WALL_LIMIT_MS * 2, `handleHook 耗时 ${ms}ms 过长`);
+    const used = process.cpuUsage(c0);
+    const cpuMs = Math.round((used.user + used.system) / 1000);
+    assert.ok(cpuMs < WALL_LIMIT_MS * 2, `handleHook CPU 耗时 ${cpuMs}ms 过长`);
     assert.equal(r.inject, false);
   });
 });
@@ -580,14 +595,18 @@ describe('注入负载预算与降级', () => {
     // 5MB 病态正文：二分每一步都要 JSON.stringify 整个前缀，代价随文件线性放大。
     // 与 detectMode 的 SCAN_BUDGET_MS=1500 叠加后必须仍远低于 hooks.json 的 timeoutMs=3000——
     // 被引擎杀掉是零字节输出，比降级失败更糟（fail-open 契约直接失效）。
+    //
+    // 量 CPU 时间而不是墙钟：这条正是本仓库唯一撞过假红的用例（机器繁忙时
+    // wall 从 708ms 涨到 5673ms 而 cpu 只到 1062ms）。要防的是算法退化，不是调度延迟。
     const root = fakePluginRoot('perf', {
       'team.md': `---\nd: x\n---\n${'## 章节\n内容内容内容\n'.repeat(150000)}`
     });
-    const t0 = Date.now();
+    const c0 = process.cpuUsage();
     const built = buildAdditionalContextDetailed('team', root, ['team']);
-    const ms = Date.now() - t0;
+    const used = process.cpuUsage(c0);
+    const cpuMs = Math.round((used.user + used.system) / 1000);
     assert.ok(built.payloadBytes <= MAX_PAYLOAD_BYTES);
-    assert.ok(ms < 1500, `5MB 正文降级耗时 ${ms}ms，与 timeoutMs=3000 余量不足（含 detectMode 的 1500ms 预算）`);
+    assert.ok(cpuMs < 1500, `5MB 正文降级 CPU 耗时 ${cpuMs}ms，与 timeoutMs=3000 余量不足（含 detectMode 的 1500ms 预算）`);
   });
 
   it('handleHook 回报 injectionLevel 与 payloadBytes，且真实注入恒在预算内', () => {

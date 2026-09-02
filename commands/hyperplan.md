@@ -1,5 +1,4 @@
 ---
-name: hyperplan
 description: "纯规划模式：omz-planner 访谈 → omz-critic 差距分析 → 批准门等待，不执行任何实现"
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "omz",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Oh My ZCode — OmO 编排能力的 ZCode 移植：core（9 子代理 / 5 命令 / 4 skill）+ 可选 graph/orchestration/dashboard profile，默认全关",
   "description_i18n": {
     "en": "A ZCode port of oh-my-openagent's orchestration: 9 subagents, 5 commands and 4 skills in the always-on core, plus graph/orchestration/dashboard profiles that are off by default.",
