@@ -4,7 +4,7 @@
 
 > **许可证边界**：本仓库以 MIT 分发（`LICENSE` 只含本项目自身的 MIT 全文）。上游 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) 采用 **Sustainable Use License 1.0**（非 OSI 协议，限定为自有内部业务用途或非商业/个人用途）。该许可证已核实，并连同逐字重叠度分析一起记录在 `upstream/omo-sources.lock.json`：与上游四个 `SKILL.md` 的 15,824 个 8-gram 比对，共享 8-gram 仅 9 个，且全部来自同一处 JSON 枚举行。两个许可证之间的边界如何判断属项目所有者的决定，`upstream/` 只做取证记录。
 
-对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.zh-CN.md](./DESIGN.zh-CN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)（当前 1.7.1）。
+对 [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) 编排能力的 ZCode 移植——能力对标，不是代码搬运。设计依据见 [DESIGN.zh-CN.md](./DESIGN.zh-CN.md)（v1.5 装机验收修订版），实现进度见 [CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)（当前 1.7.2）。
 
 ## 定位
 
@@ -111,7 +111,7 @@ ZCode 优先走 GitHub tarball API 取源（本机不需要装 `git`），只有
 ## 开发与测试
 
 ```bash
-npm test                  # 全部测试：577 用例 / 102 suites（等价 node --test tests/）
+npm test                  # 全部测试：578 用例 / 102 suites（等价 node --test tests/）
 node --test tests/        # 同上；单文件如 node --test tests/protocol.test.mjs
 npm run test:protocol     # 分文件脚本（9 个）：path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
                           # capability 与 cli 无独立脚本，用 node --test tests/<file> 单跑

@@ -33,7 +33,7 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 
 ## 第一步：激活
 
-1. 命令展开时已输出 `ULTRAWORK MODE ENABLED!`——本提示词自此为本会话工作宪法，全程不得降级执行。
+1. 命令展开时已输出 ULTRAWORK MODE ENABLED —— 本提示词自此为本会话工作宪法，全程不得降级执行。
 2. **首次运行检测 `.gitignore`**：项目根 `.gitignore` 若无 `.omz/` 条目，立即追加一行 `.omz/` 并告知用户（B14 防运行时状态误提交）；无 `.gitignore` 则创建。
 3. 先查 `.omz/boulder.json`：若存在未关闭的活跃目标（`status` 非 `done`），**必须先问用户"续跑还是放弃"**，不得静默重开（B18）。续跑时**只按 boulder 的 `active_goal` 指针**打开旧 goal 文件——它是唯一权威指针；不按当前 sessionId 猜测、不拿 `session_ids` 反推文件名（新会话 stem 必然不同，猜必错）。
 

@@ -4,7 +4,7 @@
 
 > **License boundary**: This repository is distributed under MIT (`LICENSE` contains only the full MIT text of this project itself). The upstream project [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) is under the **Sustainable Use License 1.0** (not an OSI license; it limits use to your own internal business purposes or to non-commercial/personal use). That license has been verified and is recorded, together with a verbatim overlap analysis, in `upstream/omo-sources.lock.json`: against the 15,824 8-grams of the four upstream `SKILL.md` files, only 9 8-grams are shared, and all 9 come from one and the same JSON enum line. How the boundary between the two licenses is to be judged is the project owner's decision; `upstream/` only records evidence.
 
-A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.7.1).
+A ZCode port of the orchestration capabilities of [oh-my-openagent (OmO)](https://github.com/code-yeongyu/oh-my-openagent) — capability parity, not code transplantation. The design rationale is in [DESIGN.md](./DESIGN.md) (the v1.5 installed-environment acceptance revision); implementation progress is in [CHANGELOG.md](./CHANGELOG.md) (currently 1.7.2).
 
 ## Purpose
 
@@ -111,7 +111,7 @@ Each layer can be turned off individually; a failure only degrades the correspon
 ## Development and testing
 
 ```bash
-npm test                  # All tests: 577 cases / 102 suites (equivalent to node --test tests/)
+npm test                  # All tests: 578 cases / 102 suites (equivalent to node --test tests/)
 node --test tests/        # Same as above; a single file, e.g. node --test tests/protocol.test.mjs
 npm run test:protocol     # Per-file scripts (9): path/fallback/transport/coordinator/mcp/dashboard/hooks/protocol/integration
                           # capability and cli have no dedicated script; run them one by one with node --test tests/<file>

@@ -646,6 +646,51 @@ describe('跨文件契约一致性', () => {
     }
   });
 
+  /**
+   * B31：命令文件不是文档，是**展开器的输入**。
+   *
+   * 引擎在展开自定义命令时用两条正则找 shell 展开点（zcode.cjs 的 bxt / wxt，逐字照抄）：
+   *   行内：/!`([^`]*)`/gu                       —— `!` 后跟一对反引号包裹的内容
+   *   围栏：/```!\s*\r?\n?([\s\S]*?)```/gu       —— ```! 开头的代码块
+   * 命中即把内容交给 shell 执行；非零退出会让 NPi() 抛错、**整条命令展开失败**，
+   * 消息根本到不了模型（用户侧表现为「输入 /ulw 发送失败」）。
+   *
+   * 真实事故：ulw.md 第一步曾写成 `ULTRAWORK MODE ENABLED!`（`!` 在反引号内、紧贴收尾反引号），
+   * 于是它与**两段之后**的下一对反引号配成一组，一段中文正文被丢给 cmd.exe，Exit 1。
+   * 该缺陷自 v1.5.0 起在树里，577 条用例无一发现——因为没有任何断言拿引擎正则看过命令正文。
+   *
+   * 本断言：行内形态**一处都不许有**（正文里没有任何合法用途，要执行就用围栏块）；
+   * 围栏形态是有意的，逐个登记在 EXPECTED_FENCED 里，多一个少一个都判红。
+   */
+  it('命令正文不得意外命中引擎的行内 shell 展开语法（B31）', () => {
+    const INLINE = /!`([^`]*)`/gu;
+    const FENCED = /```!\s*\r?\n?([\s\S]*?)```/gu;
+    // 有意的内联执行块：命令名 → 块数量。改这里之前先想清楚为什么需要执行块。
+    const EXPECTED_FENCED = { 'ulw.md': 1, 'omz-status.md': 1 };
+
+    for (const file of fs.readdirSync(COMMANDS_DIR).filter((n) => n.endsWith('.md'))) {
+      const text = readText(path.join(COMMANDS_DIR, file));
+      INLINE.lastIndex = 0;
+      FENCED.lastIndex = 0;
+
+      const inline = [...text.matchAll(INLINE)].map((m) => {
+        const line = text.slice(0, m.index).split(/\r?\n/).length;
+        return `${file}:${line} 附近 ${JSON.stringify(text.slice(Math.max(0, m.index - 28), m.index + 2))}`;
+      });
+      assert.deepEqual(
+        inline,
+        [],
+        `这些位置会被引擎当 shell 命令执行（把 ! 移出反引号即可）：\n  ${inline.join('\n  ')}`
+      );
+
+      assert.equal(
+        [...text.matchAll(FENCED)].length,
+        EXPECTED_FENCED[file] ?? 0,
+        `${file}: 内联执行块数量与登记不符（登记 ${EXPECTED_FENCED[file] ?? 0} 个）`
+      );
+    }
+  });
+
   it('.gitignore 忽略 .omz/（B14）', () => {
     const lines = readText(path.join(ROOT, '.gitignore')).split(/\r?\n/).map((l) => l.trim());
     assert.ok(lines.some((l) => ['.omz/', '.omz', '/.omz/', '/.omz'].includes(l)), '.gitignore 未忽略 .omz/');

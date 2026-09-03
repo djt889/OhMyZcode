@@ -4,9 +4,9 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.7.1** ↔
-DESIGN **v1.5** (1.6.0, 1.6.1, 1.7.0 and 1.7.1 are documentation, packaging and defect-fix releases; none changes the
-design spec).
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.7.2** ↔
+DESIGN **v1.5** (1.6.0 through 1.7.2 are documentation, packaging and defect-fix releases; none changes the design
+spec).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -22,6 +22,71 @@ settled by the 1.5.0 installed-environment acceptance (six items → five).
 Every entry records three things: **Scope** (what was delivered), **Verification** (how it was proven to work, with
 reproducible numbers), and **Known gaps** (what was still missing at the time). All numbers are taken from actual run
 output on Node v22.14.0 / Windows on 2026-09-01.
+
+---
+
+## 1.7.2 — `/ulw` could not be sent: prose in the command body was executed as a shell command (2026-09-03)
+
+**The defect (B31, present since v1.5.0)**
+
+Typing `/ulw` in a real session failed to send. The engine log:
+
+```
+Custom command /ulw shell expansion failed.
+Command: ——本提示词自此为本会话工作宪法，全程不得降级执行。
+2. **首次运行检测
+Exit: 1
+```
+
+The engine's inline expansion pattern is `` /!`([^`]*)`/gu `` — a `!` followed by a backtick-delimited run. Step one
+of `commands/ulw.md` was written as `` `ULTRAWORK MODE ENABLED!` ``, putting the `!` **inside the backticks,
+immediately before the closing one**. So that `!` paired with the *next* backticks in the file — two paragraphs
+further down — and the engine handed a paragraph of Chinese prose to `cmd.exe` as a shell command. Exit 1 makes
+`NPi()` throw, the whole command expansion fails, and the message never reaches the model.
+
+Reproduced three times in the logs (2026-09-02T16:00, 17:46, 2026-09-03T01:19) — every attempt the user made.
+
+**Why nothing caught it**
+
+- **577 tests, none of which looked at command bodies through the engine's own regexes.** Every command assertion was
+  about frontmatter, section structure or cross-file consistency. Reviewing a command file as prose cannot find this:
+  a command file is not a document, it is **input to an expander**, and any `!` adjacent to a backtick is executable
+  syntax.
+- **The §18 smoke chain exercised the wrong surface.** It ran `/ulw` through CLI/plugin discovery, which loads and
+  lists commands. Expansion only happens on the **session send** path, and that path was never actually sent through.
+- My first diagnosis this session was also wrong: I guessed `unsupported shell expansion` (what the engine throws
+  when there is no `executionPort`). The real message is `shell expansion failed` — the block *did* run. Two messages
+  one word apart, opposite meanings.
+
+**Scope**
+
+- The banner in `commands/ulw.md` loses its backticks; the sentence reads the same. The deliberate ```` ```! ````
+  block is untouched and verified working.
+- A new assertion scans every `commands/*.md` with **both** engine regexes: inline matches are zero-tolerance (prose
+  has no legitimate use for them — use a fenced block to execute something), and fenced blocks are registered
+  per-file so adding or losing one turns it red.
+- DESIGN gains **B31** in both languages, §13's heading extends to B1–B31, and the banner wording in §6 step 1 is
+  aligned with the fix so the document cannot drift back into recommending the broken form.
+
+**Verification**
+
+`npm test` **578 tests / 102 suites, 0 failures** (577 before, +1). Mutation-tested in both directions: writing the
+accident's exact line back → **red**; a different inline form (`` !`git status` ``) → **red**; deleting a registered
+fenced block → **red**; and the control — the same syntax inside `DESIGN.md`, a non-command file → **green**, proving
+the assertion is scoped to `commands/` rather than rejecting the pattern everywhere.
+
+The expansion chain itself was replayed outside the engine, executing every match exactly as
+`collectShellExpansionMatches` + `NPi()` would: the **fixed** tree yields 1 match, exit 0; the **shipped 1.7.1** tree
+yields 2 matches, the second exiting 1 — reproducing the user-visible failure and confirming the fix addresses it.
+
+`doctor` reports no FAIL, `validate` passes, `hook:self-test` 30/30.
+
+**Known gaps**
+
+- The static assertion covers `commands/`. Skills and agent files are not expanded by this mechanism, so they are not
+  scanned; if a future ZCode version starts expanding them, this assertion must widen with it.
+- §18's smoke chain still does not include an actual session send. That is the gap that let this defect live for
+  three releases, and closing it needs a real session, not a test.
 
 ---
 

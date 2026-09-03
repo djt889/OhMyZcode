@@ -29,7 +29,7 @@
   "plugins": [
     {
       "name": "omz",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "displayName": "Oh My ZCode",
       "displayName_i18n": {
         "zh-CN": "Oh My ZCode"
@@ -63,7 +63,7 @@
       "source": {
         "source": "github",
         "repo": "djt889/OhMyZcode",
-        "ref": "v1.7.1"
+        "ref": "v1.7.2"
       }
     }
   ]
