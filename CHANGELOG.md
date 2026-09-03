@@ -4,9 +4,9 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.7.2** ↔
-DESIGN **v1.5** (1.6.0 through 1.7.2 are documentation, packaging and defect-fix releases; none changes the design
-spec).
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.8.0** ↔
+DESIGN **v1.5** (1.6.0 through 1.7.2 are documentation, packaging and defect-fix releases that change no design
+spec; 1.8.0 changes the on-disk layout of `.omz/`, see the entry below).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -25,7 +25,109 @@ output on Node v22.14.0 / Windows on 2026-09-01.
 
 ---
 
-## 1.7.2 — `/ulw` could not be sent: prose in the command body was executed as a shell command (2026-09-03)
+## 1.8.0 — boulder slots: two sessions running /ulw in one root no longer overwrite each other (2026-09-03)
+
+**The defect (B32, present since v1.0)**
+
+`.omz/boulder.json` was a **single-valued source of truth**: `active_goal` / `works` / `session_ids` each had exactly
+one slot. Two sessions each running `/ulw` in the same project root meant the second one, at step two, **overwrote the
+first one's pointer wholesale**. Measured (two sessions persisting in the order the protocol prescribes):
+
+```
+A registers its goal → boulder.active_goal = .omz/goal/sess_AAA.json
+B registers its goal → boulder.active_goal = .omz/goal/sess_BBB.json   ← A's pointer overwritten
+                       boulder.works       = ["B-work"]                 ← A's work lost
+                       boulder.session_ids = ["sess_BBB"]               ← A's sessionId lost
+
+goal files: ['sess_AAA.json', 'sess_BBB.json']   ← these two both survive
+```
+
+The knock-on effect is subtler: from then on, every time session A does the step-one "check boulder first" continuation
+test, it reads **B's goal** — the B18 check actively misleads A, asking it "there is an unclosed goal, continue?" about
+something that was never its own.
+
+**Why a lock does not fix it**
+
+`writeJsonSafe` uses tmp + rename, so a half-written file was never possible and there is no interleaved write to
+prevent. A lock merely makes B queue behind A and **then overwrite it anyway** — the disease is "one slot, two owners",
+not the timing of the write. Locks are the primitive for lost updates in read-modify-write; here they are a mismatch.
+
+**Scope**
+
+- **New `adapters/zcode/boulder.mjs` (256 lines)**: the source of truth becomes `.omz/boulder/<stem>.json`, **one slot
+  file per session**. Each session writes only its own and never touches anyone else's; discovery is a `readdir` of that
+  directory — **the directory itself is the index**, so with no shared mutable index there is no lost update and **no
+  lock is needed anywhere**. Exports `createBoulder` / `readSlot` / `writeSlot` / `listSlots` / `openSlots` /
+  `deriveView` / `writeView` / `migrateLegacyView` / `resolveContinuation` / `safeStem` / `slotPath` and friends.
+- **`.omz/boulder.json` is demoted to a derived view**: tagged `"source": "derived"`, it feeds only
+  `tools/render-status.mjs` and the dashboard and **never participates in a continuation decision**. Precisely because it
+  takes part in no decision, losing a race is harmless for it — that is the other half of "no lock needed". It keeps the
+  four top-level fields `active_goal` / `active_plan` / `active_team` / `status` so the old board reads it with zero
+  changes, and gains `open_stems` / `open_count`.
+- **The continuation test becomes three branches** (B18's real requirement is *discoverable*, not *single-valued*): 0
+  unclosed → start fresh; 1 → ask "continue or abandon" (the 1.7.x behavior); **≥2 → list the candidates and let the user
+  choose**, each with `stem` / `active_goal` / `updated_at` / `status`, most recently active first. The third branch also
+  fixes a hazard that **existed with a single session**: under the old code a three-day-old stale boulder silently became
+  *the* pointer, and the user had no idea what they were continuing.
+- **One-time migration of the old layout**: when only the single file exists and there is no `boulder/` directory,
+  `migrateLegacyView()` turns it into one slot, preserving the five OmO v2 fields and the three OMZ extensions one by
+  one. It is **idempotent and re-entrant** (any content in the slot directory means skip, never overwriting the user's
+  later updates), and when the old file is unreadable it **does not migrate on a guess** (`reason:
+  'legacy-unreadable'`) — migration is the only action on the upgrade path that touches the user's existing data, so
+  "cannot read it" is the better outcome.
+- **schema v3**: `works` / `active_plan` / `session_ids` / `status` / `worktree_path` (the OmO v2 names, unchanged to the
+  letter) + `active_goal` / `active_team` / `finished_at` (the 1.x extensions) + **`stem` / `updated_at`** (new here: the
+  former lets a slot prove its own ownership so renaming a file does not sever the relation, the latter drives the
+  recency ordering of the three branches).
+- **Two secondary shared surfaces closed along with it**: files under `.omz/plans/` are now named `<stem>-<slug>.md` (a
+  slug is derived from the goal, two sessions deriving the same slug for similar goals is realistic, and a collision is
+  mutual overwriting); every line of `.omz/ulw-execute/ledger.jsonl` **gains a `stem` field** (appending never corrupts
+  the file, but without a stem the ownership cannot be recovered once two sessions' events interleave).
+- **`tools/render-status.mjs`**: reads the slot directory first and **renders one line per unclosed slot** (with
+  `stem=`), most recently active first so the order matches the continuation candidates; a corrupt slot gets its own
+  `[corrupt]` line; when the slot directory is absent it falls back to the old single file (a 1.7.x project works
+  unchanged).
+- **`PATH_FIELD_NAMES` gains `active_goal`**: it is a path field and was not on the whitelist, so it was not normalized
+  on write (B3 was void along that path).
+
+**Verification**
+
+- `node --test tests/` **650 tests / 650 pass / 0 fail** (1.7.2 stood at 577, so +73 this round); `npm test` likewise
+  650 pass / 0 fail.
+- **New `tests/boulder.test.mjs` (65 cases)**, written before the implementation (failing-first: the first run was
+  `ERR_MODULE_NOT_FOUND`). The load-bearing groups: 7 concurrency-isolation cases (two sessions write their own slots and
+  neither pointer is lost / ten sessions interleaved and all ten slots stay intact / **writing A does not touch B's file,
+  proven by both mtime and content**); 7 three-branch cases; 8 migration cases (idempotence, no guessing on a corrupt
+  file, `done` still migrates); 8 derived-view cases.
+- **`tests/integration.test.mjs` +6 end-to-end cases**: after two sessions persist in one root, A's slot is intact and
+  the board lists both boulder lines with the most recent first; a migrated legacy project still renders; slots and the
+  derived view come back clean from `scanJsonHygiene` (no BOM, no backslashes, no corruption); **deleting the derived view
+  leaves the continuation test accurate** (proving it really is out of the decision path); `doctor` reports no FAIL on a
+  root containing slots.
+- **6 protocol-text cases**: they assert `commands/ulw.md` and `skills/ulw-execute/SKILL.md` actually carry the slot
+  path, the three branches, "must not pick one for the user", schema v3's `stem`/`updated_at`, and the ledger's `stem` —
+  if the implementation changes and the protocol does not, the lead agent keeps writing the single file exactly as the
+  old text describes, which is the behavior this round exists to remove.
+- `node tools/doctor.mjs` reports no FAIL; `node tools/validate-frontmatter.mjs .` passes; zero residue in the temp
+  directory; no `.omz/` inside the repository.
+
+**Known gaps**
+
+- **Concurrency in one root is still not the recommended usage.** Slots remove boulder's mutual overwriting, but
+  `.omz/ulw-execute/ledger.jsonl` remains a shared append-only file (the `stem` field only makes ownership recoverable
+  afterwards; it is not isolation), and two sessions running git concurrently in one repository still collide on
+  `index.lock`. **The recommendation is still one session per worktree** (the protocol already requires "PR/branch work
+  happens in a task-specific worktree") — slots exist so that **misuse does not lose data**, not to encourage sharing a
+  root.
+- The migration path has not been run against a real 1.7.x project (the legacy file in the tests is constructed). The
+  field-level assertions cover the five OmO v2 fields and the three extensions, but a real project may carry extra fields
+  not recorded in this document — they are carried across verbatim by `{...legacy}` and are not lost, merely not pinned
+  by an assertion.
+- `dashboard/server.mjs`'s `parseFileView` still parses `render-status`'s text output line by line, and it treats the new
+  `stem=` segment as a note outside the team lines (no error, not displayed). Native slot support on the dashboard side is
+  left to the next version.
+
+---
 
 **The defect (B31, present since v1.5.0)**
 

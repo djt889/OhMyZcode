@@ -29,13 +29,19 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 
 **禁止编造 sessionId**：不得写 `sess_x`、`sess_1`、`unknown`、`current`、随手编的 hash 或任何未从上面输出取得的值。这类占位在本轮内自洽、看板照常渲染、doctor 也检不出来（表面全绿），但下一个会话按 B18 找指针时它与真实会话毫无对应关系，跨会话续跑就从"指针精确"退化为"文件名恰好还在"——与 B22 同族的假成功。若执行块整段失败（没有任何输出），**停下问用户**，不要用默认值顶上。
 
-**跨会话找回的唯一权威指针是 `.omz/boulder.json` 的 `active_goal` 字段**（正斜杠相对路径）。`session_ids` 只是审计线索，**任何时候都不用它定位文件**。因此即使 sessionId 永久不可得、即使文件名走了回退形态，B18 的续跑流程仍然精确。
+**跨会话找回的唯一权威指针是 `.omz/boulder/<stem>.json` 的 `active_goal` 字段**（正斜杠相对路径）。`session_ids` 只是审计线索，**任何时候都不用它定位文件**。因此即使 sessionId 永久不可得、即使文件名走了回退形态，B18 的续跑流程仍然精确。
+
+**boulder 是每会话一个槽位文件，不是一个全局单文件（B32）**：`.omz/boulder/` 下每会话一份 `<stem>.json`，你只写属于自己的那一个，绝不改别人的——两个会话在同一项目根并发跑时，旧的单文件形态会让后写的把先写的 `active_goal`/`works`/`session_ids` 整体覆盖。`.omz/boulder.json` 自 1.8.0 起降级为**派生视图**（带 `"source": "derived"` 标记，只给看板读），**不得**当事实源读写。旧布局（只有单文件、没有 `boulder/` 目录）在首次访问时被一次性迁成单槽位，字段不丢、行为不变。
 
 ## 第一步：激活
 
 1. 命令展开时已输出 ULTRAWORK MODE ENABLED —— 本提示词自此为本会话工作宪法，全程不得降级执行。
 2. **首次运行检测 `.gitignore`**：项目根 `.gitignore` 若无 `.omz/` 条目，立即追加一行 `.omz/` 并告知用户（B14 防运行时状态误提交）；无 `.gitignore` 则创建。
-3. 先查 `.omz/boulder.json`：若存在未关闭的活跃目标（`status` 非 `done`），**必须先问用户"续跑还是放弃"**，不得静默重开（B18）。续跑时**只按 boulder 的 `active_goal` 指针**打开旧 goal 文件——它是唯一权威指针；不按当前 sessionId 猜测、不拿 `session_ids` 反推文件名（新会话 stem 必然不同，猜必错）。
+3. **续跑判定按未关闭槽位个数分三支**（B18 + B32）。枚举 `.omz/boulder/*.json` 里 `status` 非 `done` 的槽位（等价于 `adapters/zcode/boulder.mjs` 的 `resolveContinuation()`；若 `.omz/boulder/` 不存在而旧单文件 `.omz/boulder.json` 存在，先迁移再判定）：
+   - **0 个** → 全新开始，不必问用户。
+   - **1 个** → **必须先问用户"续跑还是放弃"**，不得静默重开。续跑时**只按该槽位 `active_goal` 的字面值**打开旧 goal 文件；不按当前 sessionId 猜测、不拿 `session_ids` 反推文件名（新会话 stem 必然不同，猜必错）。
+   - **≥2 个** → **必须把候选列给用户选**，逐条给出 `stem` / `active_goal` / `updated_at` / `status`（按 `updated_at` 倒序），由用户指定续哪一个或全部放弃。**不得自行挑一个**——三天前的陈旧槽位与刚才中断的槽位在协议眼里没有优先级差别，替用户选就是替他丢工作。
+   - 读不出来的槽位**单独报出**，不计入上面的计数、也不猜内容。
 
 ## 第二步：目标注册
 
@@ -60,7 +66,7 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 
 成功标准必须是**可失败的二进制条件**；同文件存宪法检查清单，每个提交点前强制自查（B17 防质量衰减）。
 
-**写完 goal 立即创建/更新 `.omz/boulder.json`**（不要等到收尾——若会话在第一个波次前中断，没有指针就无法跨会话续跑，B18）：`active_goal` 指向该 goal 文件的正斜杠相对路径、`status: "active"`；`session_ids` 仅在拿到真实 sessionId 时追加该值，回退命名下保持 `[]`。最小字段（Boulder schema v2，见 ulw-execute skill）：
+**写完 goal 立即创建/更新自己的槽位 `.omz/boulder/<OMZ_GOAL_STEM>.json`**（不要等到收尾——若会话在第一个波次前中断，没有指针就无法跨会话续跑，B18）：`active_goal` 指向该 goal 文件的正斜杠相对路径、`status: "active"`；`session_ids` 仅在拿到真实 sessionId 时追加该值，回退命名下保持 `[]`。最小字段（Boulder schema v3，见 ulw-execute skill）：
 
 ```json
 {
@@ -70,11 +76,15 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
   "status": "active",
   "worktree_path": null,
   "active_goal": ".omz/goal/<OMZ_GOAL_STEM>.json",
-  "active_team": null
+  "active_team": null,
+  "stem": "<OMZ_GOAL_STEM，与文件名一致>",
+  "updated_at": "<ISO-8601>"
 }
 ```
 
-`active_goal` 是**跨会话找回目标的唯一权威指针**；`session_ids` 只作审计线索，不参与任何文件定位。此后每次波次推进、计划定稿（填 `active_plan`）、建团队（填 `active_team`）都就地更新此文件。
+`active_goal` 是**跨会话找回目标的唯一权威指针**；`session_ids` 只作审计线索，不参与任何文件定位。此后每次波次推进、计划定稿（填 `active_plan`）、建团队（填 `active_team`）都就地更新**你自己的那一个槽位文件**——**绝不写别人的槽位，也绝不写 `.omz/boulder.json`**（后者是派生视图，由工具刷新）。
+
+**计划文件名带 stem 前缀**：`.omz/plans/<OMZ_GOAL_STEM>-<slug>.md`。slug 由目标推导，两个会话对相似目标推出同名 slug 是现实可能，撞名就是互相覆盖；带上 stem 后无论如何都不会碰。
 
 ## 第三步：技能盘点
 
@@ -88,7 +98,7 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 
 ## 第五步：规划（强制门槛）
 
-满足任一条件即派 `omz-planner` 访谈规划：≥2 步骤 / 多文件 / 含架构决策。产出 `.omz/plans/<slug>.md`（分波次），经 `omz-critic` 差距分析后定稿。**同一场景的测试与实现严禁并行。**
+满足任一条件即派 `omz-planner` 访谈规划：≥2 步骤 / 多文件 / 含架构决策。产出 `.omz/plans/<OMZ_GOAL_STEM>-<slug>.md`（分波次），经 `omz-critic` 差距分析后定稿。**同一场景的测试与实现严禁并行。**
 
 ## 第六步：执行
 
@@ -131,13 +141,13 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 4. 编排者零实现（B21 两类例外已含在第六步，除此之外无例外）。
 5. 对抗类必探：9 类（malformed input / prompt injection / cancel-resume / stale state / dirty worktree / hung commands / flaky tests / misleading success output / repeated interruptions）——适用必探、排除记理由。
 6. worktree 纪律：PR/分支工作在任务专属 worktree；主 worktree 只读；评审用 worktree `git worktree lock --reason`，用完 unlock+remove。
-7. 状态文件一律正斜杠相对路径（B3）；UTF-8 无 BOM，禁用 PowerShell 写 `.omz/`（B4）；goal 文件名只用第零步给出的 `OMZ_GOAL_STEM`，**编造 sessionId 即违规**，跨会话找回只认 boulder 的 `active_goal`。
+7. 状态文件一律正斜杠相对路径（B3）；UTF-8 无 BOM，禁用 PowerShell 写 `.omz/`（B4）；goal 文件名只用第零步给出的 `OMZ_GOAL_STEM`，**编造 sessionId 即违规**，跨会话找回只认自己槽位的 `active_goal`；**只写自己的 `.omz/boulder/<stem>.json`，不写别人的槽位、不写派生视图 `.omz/boulder.json`**（B32）。
 8. 波次推进以 results 文件为准，通知只作提醒（B8 唯一事实源）。
 9. 省流阀是 MUST 不是建议：quick 委派即违规；omz-* 返回正文 ≤20 行、全文写 results。
 10. 每个提交点前自查 goal.json 宪法检查清单（B17）；Blocker 未清零禁止提交（B11）。
 
 ## 收尾
 
-所有 SC 转 done 后：更新 boulder.json（`status: done` + 完成时间），输出达成摘要（各 SC 证据索引）。
+所有 SC 转 done 后：更新自己的槽位 `.omz/boulder/<OMZ_GOAL_STEM>.json`（`status: done` + `finished_at` 填 ISO-8601 完成时间），输出达成摘要（各 SC 证据索引）。
 
-**进度落盘靠你自己，不靠 hook**：主 agent 在**每个波次收点后**主动写 `.omz/boulder.json`（当前指针 + 未完 TODO）。Stop hook 属**未实装项**（`hooks/hooks.json` 目前只注册 `UserPromptSubmit`），**不得依赖**它在异常终止时保存进度。异常终止时未完成部分不得声称完成。
+**进度落盘靠你自己，不靠 hook**：主 agent 在**每个波次收点后**主动写自己的槽位 `.omz/boulder/<OMZ_GOAL_STEM>.json`（当前指针 + 未完 TODO）。Stop hook 属**未实装项**（`hooks/hooks.json` 目前只注册 `UserPromptSubmit`），**不得依赖**它在异常终止时保存进度。异常终止时未完成部分不得声称完成。

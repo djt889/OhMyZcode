@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, resolveProfiles, formatDegradeReport } from '../adapters/zcode/fallback.mjs';
 import { probeAll, probeCoordinator } from '../adapters/zcode/capability.mjs';
 import { scanJsonHygiene, writeJsonSafe, deepNormalizePaths } from '../adapters/zcode/path.mjs';
+import { createBoulder, writeSlot, readSlot, migrateLegacyView, resolveContinuation } from '../adapters/zcode/boulder.mjs';
 import { closeDb, openDb } from '../mcp/coordinator/db.mjs';
 import {
   teamCreate,
@@ -440,5 +441,155 @@ describe('降级链', () => {
     assert.equal(resolved.active.orchestration, false);
     assert.deepEqual(resolved.degraded.filter((d) => d.profile === 'orchestration'), []);
     assert.equal(resolved.active.core, true);
+  });
+});
+
+/**
+ * 端到端：两个会话在同一项目根各跑一次 /ulw 的状态面，检验槽位化真的解决了 B32。
+ * 这里不模拟 LLM 行为，只按协议规定的写入顺序落盘，然后用真实的 render-status 渲染。
+ */
+describe('两会话同根并发的状态面（B32 端到端）', () => {
+  it('两个会话各自的 goal 与槽位都完整，看板同时列出两条 boulder 行', () => {
+    const root = makeProject();
+    // 会话 A：注册 goal → 写自己的槽位
+    writeJsonSafe(path.join(root, '.omz', 'goal', 'sess_AAA.json'), {
+      session_id: 'sess_AAA',
+      id_source: 'real-session-id',
+      outcome: 'A 的目标：重构缓存层'
+    });
+    const a = createBoulder({ stem: 'sess_AAA', sessionId: 'sess_AAA' });
+    a.works = ['A-work'];
+    a.active_plan = '.omz/plans/sess_AAA-refactor-cache.md';
+    writeSlot(root, a, { now: Date.parse('2026-09-03T10:00:00.000Z') });
+
+    // 会话 B：并发注册自己的 goal 与槽位
+    writeJsonSafe(path.join(root, '.omz', 'goal', 'sess_BBB.json'), {
+      session_id: 'sess_BBB',
+      id_source: 'real-session-id',
+      outcome: 'B 的目标：修登录 bug'
+    });
+    const b = createBoulder({ stem: 'sess_BBB', sessionId: 'sess_BBB' });
+    b.works = ['B-work'];
+    b.active_plan = '.omz/plans/sess_BBB-fix-login.md';
+    writeSlot(root, b, { now: Date.parse('2026-09-03T11:00:00.000Z') });
+
+    // A 的槽位在 B 落盘后依然完整——旧单文件实现在这里会读到 B 的内容
+    const ra = readSlot(root, 'sess_AAA');
+    assert.equal(ra.ok, true, 'A 的槽位不该被 B 覆盖');
+    assert.equal(ra.slot.active_goal, '.omz/goal/sess_AAA.json');
+    assert.deepEqual(ra.slot.works, ['A-work']);
+    assert.deepEqual(ra.slot.session_ids, ['sess_AAA']);
+    assert.equal(readSlot(root, 'sess_BBB').slot.active_goal, '.omz/goal/sess_BBB.json');
+
+    // 两个 goal 文件也都在
+    assert.deepEqual(fs.readdirSync(path.join(root, '.omz', 'goal')).sort(), ['sess_AAA.json', 'sess_BBB.json']);
+
+    // 看板同时列出两条 boulder 行（最近活动的 B 在前）
+    const lines = collectStatus(path.join(root, '.omz'));
+    const boulderLines = lines.filter((l) => l.startsWith('[boulder]'));
+    assert.equal(boulderLines.length, 2, `应有两条 boulder 行，实际：${JSON.stringify(boulderLines)}`);
+    assert.ok(boulderLines[0].includes('sess_BBB'), '最近活动的槽位应排最前');
+    assert.ok(boulderLines[1].includes('sess_AAA'));
+    assert.ok(lines.length <= 40, `渲染行数 ${lines.length} 超过 40 行硬上限`);
+  });
+
+  it('续跑判定给出 choose 分支并按最近活动倒序列出候选', () => {
+    const root = makeProject();
+    writeSlot(root, createBoulder({ stem: 'sess_older' }), { now: Date.parse('2026-09-01T00:00:00.000Z') });
+    writeSlot(root, createBoulder({ stem: 'sess_newer' }), { now: Date.parse('2026-09-03T00:00:00.000Z') });
+
+    const r = resolveContinuation(root);
+    assert.equal(r.action, 'choose', '两个未关闭槽位必须让用户选，不得替他挑');
+    assert.deepEqual(r.slots.map((s) => s.stem), ['sess_newer', 'sess_older']);
+    for (const s of r.slots) {
+      assert.equal(typeof s.active_goal, 'string');
+      assert.equal(typeof s.updated_at, 'string');
+    }
+  });
+
+  it('一个会话收尾后另一个仍是 active，续跑退回 confirm 分支', () => {
+    const root = makeProject();
+    writeSlot(root, createBoulder({ stem: 'sess_finish' }));
+    writeSlot(root, createBoulder({ stem: 'sess_live' }));
+
+    const done = readSlot(root, 'sess_finish').slot;
+    done.status = 'done';
+    done.finished_at = '2026-09-03T12:00:00.000Z';
+    writeSlot(root, done);
+
+    const r = resolveContinuation(root);
+    assert.equal(r.action, 'confirm');
+    assert.deepEqual(r.slots.map((s) => s.stem), ['sess_live']);
+  });
+
+  it('旧单文件项目根被迁成槽位后不丢字段，看板照常渲染', () => {
+    const root = makeProject();
+    // 1.7.x 的旧布局：只有 .omz/boulder.json，没有 boulder/ 目录
+    writeJsonSafe(path.join(root, '.omz', 'boulder.json'), {
+      works: ['legacy-work'],
+      active_plan: '.omz/plans/legacy.md',
+      session_ids: ['sess_LEGACY'],
+      status: 'active',
+      worktree_path: null,
+      active_goal: '.omz/goal/sess_LEGACY.json',
+      active_team: 'team-legacy',
+      finished_at: null
+    });
+
+    const m = migrateLegacyView(root);
+    assert.equal(m.migrated, true);
+    assert.equal(m.stem, 'sess_LEGACY');
+    const slot = readSlot(root, 'sess_LEGACY').slot;
+    assert.deepEqual(slot.works, ['legacy-work']);
+    assert.equal(slot.active_team, 'team-legacy');
+
+    const lines = collectStatus(path.join(root, '.omz'));
+    const boulderLines = lines.filter((l) => l.startsWith('[boulder]'));
+    assert.equal(boulderLines.length, 1);
+    assert.ok(boulderLines[0].includes('sess_LEGACY'));
+  });
+
+  it('落盘的槽位与派生视图经 scanJsonHygiene 扫描后无 BOM/反斜杠/损坏', () => {
+    const root = makeProject();
+    const b = createBoulder({ stem: 'sess_hygiene', sessionId: 'sess_hygiene' });
+    // 故意给 Windows 绝对路径，检验落盘归一（B3）
+    b.active_plan = path.join(root, '.omz', 'plans', 'sess_hygiene-x.md');
+    b.worktree_path = path.join(root, 'wt', 'feature');
+    writeSlot(root, b);
+
+    const scan = scanJsonHygiene(path.join(root, '.omz'));
+    assert.deepEqual(scan.bom, []);
+    assert.deepEqual(scan.corrupt, []);
+    assert.deepEqual(
+      scan.backslash.map((x) => `${path.relative(root, x.file)}#${x.keyPath}`),
+      [],
+      `槽位或派生视图里出现反斜杠路径（B3）：${JSON.stringify(scan.backslash)}`
+    );
+    const slot = readSlot(root, 'sess_hygiene').slot;
+    assert.equal(slot.active_plan, '.omz/plans/sess_hygiene-x.md');
+    assert.equal(slot.worktree_path, 'wt/feature');
+  });
+
+  it('派生视图自带 derived 标记，且不参与续跑决策（删掉它续跑仍准确）', () => {
+    const root = makeProject();
+    writeSlot(root, createBoulder({ stem: 'sess_derived' }));
+    const view = JSON.parse(fs.readFileSync(path.join(root, '.omz', 'boulder.json'), 'utf8'));
+    assert.equal(view.source, 'derived');
+    assert.equal(view.active_goal, '.omz/goal/sess_derived.json');
+
+    // 删掉派生视图：续跑决策只读槽位目录，不受影响
+    fs.rmSync(path.join(root, '.omz', 'boulder.json'), { force: true });
+    const r = resolveContinuation(root);
+    assert.equal(r.action, 'confirm');
+    assert.equal(r.slots[0].stem, 'sess_derived');
+  });
+
+  it('doctor 在含槽位的项目根上仍无 FAIL（槽位不引入新的卫生问题）', async () => {
+    const root = makeProject();
+    writeSlot(root, createBoulder({ stem: 'sess_doctor', sessionId: 'sess_doctor' }));
+    const report = await runDoctor({ projectRoot: root });
+    const fails = report.checks.filter((c) => c.status === 'FAIL');
+    assert.deepEqual(fails.map((f) => f.id), [], `不应有 FAIL：${fails.map((f) => `${f.id}: ${f.detail}`).join('；')}`);
+    assert.equal(report.ok, true);
   });
 });

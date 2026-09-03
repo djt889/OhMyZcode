@@ -48,6 +48,7 @@ export const PATH_FIELD_NAMES = Object.freeze([
   'files',
   'plan',
   'active_plan',
+  'active_goal',
   'goal_file',
   'artifact',
   'artifacts',

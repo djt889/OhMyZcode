@@ -15,29 +15,33 @@ description: "仅当用户/主 agent 要求按已定稿的 .omz/plans/<slug>.md 
 - **你若是被委派的子代理**（工具面无 `Agent`）：不得再委派——只执行分给你的单个任务，把需要别人做的部分写成明确请求回报主 agent，由主 agent 代派。
 - 判断方法：检查自己的工具面有无 `Agent`。没有 = 你是叶节点，本节的派发条款对你只读不执行。
 
-## Boulder schema（v2，OmO 原 5 字段名不变）
+## Boulder schema（v3 槽位化，OmO 原 5 字段名不变）
 
-`.omz/boulder.json`：
+`.omz/boulder/<stem>.json` —— **每会话一个槽位文件**，你只读写属于本次执行的那一个：
 
 ```json
 {
   "works": ["<work item id>"],
-  "active_plan": ".omz/plans/<slug>.md",
+  "active_plan": ".omz/plans/<stem>-<slug>.md",
   "session_ids": ["<真实 sessionId；拿不到真实值时本数组为空 []，不塞占位符>"],
   "status": "active | paused | done",
   "worktree_path": "<相对路径或 null>",
   "active_goal": ".omz/goal/<stem>.json（stem 两种形态：真实 sessionId，或回退的 <ISO 时间戳>-<git HEAD 短哈希>，非 git 仓库哈希位为 nogit，如 .omz/goal/2026-09-01T1503-nogit.json）",
   "active_team": "<teamId 或 null>",
-  "finished_at": "<ISO-8601 字符串；未完成时 null>"
+  "finished_at": "<ISO-8601 字符串；未完成时 null>",
+  "stem": "<与文件名一致，槽位自证归属>",
+  "updated_at": "<ISO-8601，每次写入刷新>"
 }
 ```
 
 - OmO v2 原 schema 的 5 个字段（`works` / `active_plan` / `session_ids` / `status` / `worktree_path`）**字段名一字不改**。
-- `active_goal` / `active_team` / `finished_at` 是 **OMZ 扩展字段**：`active_goal` 解 B18 的 goal 指针问题，`active_team` 接 coordinator，`finished_at` 承载 `/ulw` 收尾要求的"完成时间"（`status: done` 时必填 ISO-8601，其余状态为 `null`）。
+- `active_goal` / `active_team` / `finished_at` 是 **OMZ 扩展字段**：`active_goal` 解 B18 的 goal 指针问题，`active_team` 接 coordinator，`finished_at` 承载 `/ulw` 收尾要求的"完成时间"（`status: done` 时必填 ISO-8601，其余状态为 `null`）。`stem` / `updated_at` 是 v3 新增：前者让槽位自证归属（有人重命名文件后归属关系不失联），后者供续跑分支按最近活动排序。
+- **槽位化的理由（B32）**：旧的单文件 `.omz/boulder.json` 是单值事实源，两个会话在同一项目根并发跑时，后写的会把先写的 `active_goal`/`works`/`session_ids` 整体覆盖——goal 文件都还在，指针只剩一个。槽位化后每个会话只写自己那一个文件，**目录本身就是索引**，不需要任何锁。加锁解决不了这件事：写交错本来就不存在（tmp+rename），排队之后照样覆盖。
+- **`.omz/boulder.json` 自 1.8.0 起是派生视图**（带 `"source": "derived"` 标记，只喂 `tools/render-status.mjs` 与 dashboard）：**它永不参与续跑决策，也不得被写**。正因为它不参与决策，它输给竞态才无害。
 - **`active_goal` 是跨会话找回目标的唯一权威指针**：一律读它的**字面值**去开 goal 文件。文件名可能是真实 sessionId，也可能是 `<ISO 时间戳>-<git HEAD 短哈希>` 回退形态（命名规则见 `commands/ulw.md` 第零步）——**禁止按当前 sessionId 反推文件名**，也禁止拿 `session_ids` 反推（新会话 stem 必然不同，猜必错）。goal 文件里的 `id_source` 字段（`real-session-id` | `fallback-timestamp-githead`）只作命名来源备查，不参与定位。
 - **`session_ids` 只是审计线索**，**不参与任何文件定位**；它**可能是空数组 `[]`**（回退命名下就该保持 `[]`，不写 `UNAVAILABLE` 之类占位符），空数组不代表状态异常。
-- **子代理（含 Atlas 执行会话）结构性拿不到 sessionId**：会话 id 变量只在 hook / MCP server / 命令执行块上下文展开，Bash 工具的 env 与系统提示词 `<env>` 块里都没有它。因此子代理对 `session_ids` **只读不写**（既不追加也不改动），`active_goal` 一律沿用文件里已有的路径；需要新建 goal 指针时把它**写成派单建议交回主 agent**。**禁止编造 sessionId**（`sess_x`、`unknown`、`current`、时间戳硬编、自编 hash 都不行）——这类占位本轮自洽、看板照常渲染、doctor 也检不出来，却让下一个会话彻底失准，是 B22 同族的假成功。
-- 每个波次推进后更新；新会话从 boulder 的 `active_goal` 恢复指针，不按当前 sessionId 猜 goal 文件（B18）。
+- **子代理（含 Atlas 执行会话）结构性拿不到 sessionId**：会话 id 变量只在 hook / MCP server / 命令执行块上下文展开，Bash 工具的 env 与系统提示词 `<env>` 块里都没有它。因此子代理对 `session_ids` **只读不写**（既不追加也不改动），`stem` 与 `active_goal` 一律沿用槽位文件里已有的值；需要新建 goal 指针或新槽位时把它**写成派单建议交回主 agent**。**禁止编造 sessionId**（`sess_x`、`unknown`、`current`、时间戳硬编、自编 hash 都不行）——这类占位本轮自洽、看板照常渲染、doctor 也检不出来，却让下一个会话彻底失准，是 B22 同族的假成功。
+- 每个波次推进后更新**自己的槽位**；新会话按槽位的 `active_goal` 恢复指针，不按当前 sessionId 猜 goal 文件（B18）。未关闭槽位有多个时由主 agent 列给用户选，不得替用户挑（三分支判定见 `commands/ulw.md` 第一步）。
 
 
 ## LIGHT / HEAVY 分级
@@ -126,12 +130,14 @@ malformed input / prompt injection / cancel-resume / stale state / dirty worktre
 `.omz/ulw-execute/ledger.jsonl`，每事件一行：
 
 ```json
-{ "ts": "ISO-8601", "event": "claim|gate|complete|fail|review|commit", "task": "T-003", "detail": {} }
+{ "ts": "ISO-8601", "stem": "<本次执行所属槽位的 stem>", "event": "claim|gate|complete|fail|review|commit", "task": "T-003", "detail": {} }
 ```
+
+`stem` 必填（B32）：ledger 是**追加写的共享文件**，两个会话同根并发时事件会交织在一起。行本身不会损坏（追加是原子的），但**没有 stem 就无法反解归属**——事后看到一串 claim/complete 无法判断哪些属于哪次执行。stem 取自你正在更新的那个槽位。
 
 ## No-plan bootstrap
 
-无可选计划时（`.omz/plans/` 下没有对应 slug，或 boulder 的 `active_plan` 指向不存在的文件）：把用户原话当已批准意图，**反向先走 ulw-plan 产计划**（由主 agent 派 omz-planner），再回本协议执行。**不得空中执行**——没有计划文件就没有波次、没有 checkbox、没有唯一事实源。
+无可选计划时（`.omz/plans/` 下没有对应 `<stem>-<slug>.md`，或槽位的 `active_plan` 指向不存在的文件）：把用户原话当已批准意图，**反向先走 ulw-plan 产计划**（由主 agent 派 omz-planner），再回本协议执行。**不得空中执行**——没有计划文件就没有波次、没有 checkbox、没有唯一事实源。
 
 ## Hard rules（10 条，违反即违规）
 

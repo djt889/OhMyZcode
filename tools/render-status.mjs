@@ -6,12 +6,15 @@
  * 纪律：
  * - JSON 读取一律走 adapters/zcode/path.mjs 的 readJsonSafe（唯一读写入口），并按 reason 分流：
  *   missing（文件不存在/竞态删除）不等于 corrupt（内容坏），两者混为 [corrupt] 会误导排查。
+ * - boulder 事实源是 `.omz/boulder/<stem>.json` 槽位目录（B32），逐个未关闭槽位渲染一行；
+ *   `.omz/boulder.json` 是派生视图，只在槽位目录不存在时兼容回退，绝不当事实源。
  * - 落表字段全部经 cell() 剥换行/制表符：本面板是 DESIGN B8「唯一事实源」的投影，
  *   任务 title 里带 `\n 1 | T-999 | done | forged` 就能凭空伪造一整行任务。
  * - 波次排序必须按数值：字典序会排出 1 → 10 → 2，把波次面板的语义搞反。
  */
 import path from 'node:path';
 import { readJsonSafe } from '../adapters/zcode/path.mjs';
+import { openSlots } from '../adapters/zcode/boulder.mjs';
 import { isMainModule } from './lib/is-main.mjs';
 import fs from 'node:fs';
 
@@ -63,15 +66,36 @@ export function collectStatus(omzRoot) {
     }
   };
 
-  // boulder：跨会话活跃指针
-  const boulder = readJson(path.join(omzRoot, 'boulder.json'));
-  if (boulder.value) {
-    const b = boulder.value;
-    lines.push(
-      `[boulder] active_goal=${cell(b.active_goal ?? '-')} active_plan=${cell(b.active_plan ?? '-')} team=${cell(b.active_team ?? '-')} status=${cell(b.status ?? '-')}`
-    );
-  } else if (boulder.corrupt) {
-    lines.push(`[boulder] boulder.json [corrupt] (${boulder.corrupt})`);
+  // boulder：跨会话活跃指针。
+  // 事实源是 .omz/boulder/<stem>.json 槽位目录（B32：多会话同根不再互相覆盖），
+  // 每个未关闭槽位渲染一行；.omz/boulder.json 只是派生视图，仅在槽位目录不存在时（1.7.x
+  // 旧布局、或迁移前）作兼容回退读取——它永远不是事实源。
+  const slotDir = path.join(omzRoot, 'boulder');
+  const projectRoot = path.dirname(omzRoot);
+  if (fs.existsSync(slotDir)) {
+    // openSlots 已按 updated_at 倒序（最近活动排最前），面板顺序与续跑候选顺序一致
+    const { slots, corrupt } = openSlots(projectRoot);
+    for (const s of slots) {
+      lines.push(
+        `[boulder] stem=${cell(s.stem ?? '-', 24)} active_goal=${cell(s.active_goal ?? '-')} active_plan=${cell(s.active_plan ?? '-')} team=${cell(s.active_team ?? '-')} status=${cell(s.status ?? '-')}`
+      );
+    }
+    if (slots.length === 0 && corrupt.length === 0 && fs.readdirSync(slotDir).length > 0) {
+      lines.push('[boulder] 全部目标已关闭（无未完成指针）');
+    }
+    for (const c of corrupt) {
+      lines.push(`[boulder] ${cell(path.basename(c.file ?? '?'))} [corrupt] (${cell(c.reason ?? 'unknown', 20)})`);
+    }
+  } else {
+    const boulder = readJson(path.join(omzRoot, 'boulder.json'));
+    if (boulder.value) {
+      const b = boulder.value;
+      lines.push(
+        `[boulder] active_goal=${cell(b.active_goal ?? '-')} active_plan=${cell(b.active_plan ?? '-')} team=${cell(b.active_team ?? '-')} status=${cell(b.status ?? '-')}`
+      );
+    } else if (boulder.corrupt) {
+      lines.push(`[boulder] boulder.json [corrupt] (${boulder.corrupt})`);
+    }
   }
 
   // goals

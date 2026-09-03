@@ -2,7 +2,7 @@
 
 # OMZ 实现变更日志
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.7.2** ↔ DESIGN **v1.5**（1.6.0 至 1.7.2 都是文档、打包与缺陷修复版本，均未改动设计规格）。
+**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.8.0** ↔ DESIGN **v1.5**（1.6.0 至 1.7.2 是文档、打包与缺陷修复版本，均未改动设计规格；1.8.0 改了 `.omz/` 的状态布局，见下条）。
 
 **跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
 
@@ -10,7 +10,53 @@
 
 ---
 
-## 1.7.2 — `/ulw` 发不出去：命令正文被当成 shell 命令执行了（2026-09-03）
+## 1.8.0 — boulder 槽位化：两个会话同根跑 /ulw 不再互相覆盖（2026-09-03）
+
+**缺陷（B32，自 v1.0 起存在）**
+
+`.omz/boulder.json` 是**单值事实源**：`active_goal` / `works` / `session_ids` 各只有一个槽。两个会话在同一项目根各跑一次 `/ulw`，第二个会话在第二步写 boulder 时会把第一个的指针**整体覆盖**。实测（两会话按协议顺序落盘）：
+
+```
+A 注册目标 → boulder.active_goal = .omz/goal/sess_AAA.json
+B 注册目标 → boulder.active_goal = .omz/goal/sess_BBB.json   ← A 的指针被覆盖
+             boulder.works       = ["B-work"]                 ← A 的 work 丢了
+             boulder.session_ids = ["sess_BBB"]                ← A 的 sessionId 丢了
+
+goal 文件：['sess_AAA.json', 'sess_BBB.json']   ← 这两个反而都活着
+```
+
+次生影响更隐蔽：A 会话此后每次按第一步「先查 boulder」做续跑判定，读到的都是 **B 的目标**——B18 那条检查反过来误导 A，问它「有个未关闭的目标要续跑吗」，而那根本不是它的。
+
+**为什么加锁解决不了**
+
+`writeJsonSafe` 用 tmp + rename，本来就不会写出半截文件，所以这里没有「写交错」可防。加锁只是让 B 排队等 A 写完，**排完照样覆盖**——病根是「单槽位两个主人」，不是写的时机。锁是给「读-改-写丢更新」用的原语，用在这里是错配。
+
+**范围**
+
+- **新增 `adapters/zcode/boulder.mjs`（256 行）**：事实源改为 `.omz/boulder/<stem>.json`，**每会话一个槽位文件**。每个会话只写自己那一个，从不碰别人的；发现机制是 `readdir` 那个目录——**目录本身就是索引**，没有共享可变索引也就没有丢更新，**全程不需要锁**。导出 `createBoulder` / `readSlot` / `writeSlot` / `listSlots` / `openSlots` / `deriveView` / `writeView` / `migrateLegacyView` / `resolveContinuation` / `safeStem` / `slotPath` 等。
+- **`.omz/boulder.json` 降级为派生视图**：带 `"source": "derived"` 标记，只喂 `tools/render-status.mjs` 与 dashboard，**永不参与续跑决策**。正因为它不参与决策，它输给竞态才无害——这是「不需要锁」的另一半理由。保留 `active_goal` / `active_plan` / `active_team` / `status` 四个顶层字段，旧看板零改动即可读；另加 `open_stems` / `open_count`。
+- **续跑判定改为三分支**（B18 的真实要求是「可发现」，不是「单值」）：0 个未关闭 → 全新开始；1 个 → 问「续跑还是放弃」（1.7.x 的行为）；**≥2 个 → 列出候选让用户选**，逐条给 `stem` / `active_goal` / `updated_at` / `status`，按最近活动倒序。第三分支顺带修掉一个**单会话下就存在**的隐患：旧实现里三天前的陈旧 boulder 也会静默变成「那个」指针，用户根本不知道自己在续什么。
+- **旧布局一次性迁移**：只有单文件、没有 `boulder/` 目录时，`migrateLegacyView()` 迁成单槽位，OmO v2 五字段 + OMZ 三扩展字段逐个保留。**幂等可重入**（槽位目录已有内容即跳过，绝不覆盖用户后续更新）；旧文件损坏时**不猜着迁**（`reason: 'legacy-unreadable'`）——迁移是升级路径上唯一会碰用户既有数据的动作，宁可让人看到「读不出来」。
+- **schema v3**：`works` / `active_plan` / `session_ids` / `status` / `worktree_path`（OmO v2 原名一字不改）+ `active_goal` / `active_team` / `finished_at`（1.x 扩展）+ **`stem` / `updated_at`**（本版新增：前者让槽位自证归属，有人重命名文件后关系不失联；后者供三分支按最近活动排序）。
+- **两处次生共享面一并收口**：`.omz/plans/` 的文件名改为 `<stem>-<slug>.md`（slug 由目标推导，两个会话对相似目标推出同名 slug 是现实可能，撞名就是互相覆盖）；`.omz/ulw-execute/ledger.jsonl` 的每行**加 `stem` 字段**（追加写不会损坏，但没有 stem 就无法反解归属，两个会话的事件交织后分不清哪条属于谁）。
+- **`tools/render-status.mjs`**：优先读槽位目录，**逐个未关闭槽位渲染一行**（带 `stem=`），按最近活动倒序，与续跑候选顺序一致；损坏槽位单独标 `[corrupt]`；槽位目录不存在时回退读旧单文件（1.7.x 项目零改动可用）。
+- **`PATH_FIELD_NAMES` 补登 `active_goal`**：它是路径字段，此前不在白名单里，落盘时不会被归一（B3 在这条路径上失效）。
+
+**验证**
+
+- `node --test tests/` **650 tests / 650 pass / 0 fail**（1.7.2 是 577 → 本轮 +73），`npm test` 同样 650 pass / 0 fail。
+- **新增 `tests/boulder.test.mjs`（65 用例）**，写在实现之前（failing-first：首跑 `ERR_MODULE_NOT_FOUND`）。关键组：并发隔离 7 例（两会话各写自己的槽位后彼此指针都不丢 / 十会话交错写入后十个槽位全部完整 / **写 A 不改动 B 的文件，mtime 与内容双证**）；三分支 7 例；迁移 8 例（含幂等、损坏不猜、done 也迁）；派生视图 8 例。
+- **`tests/integration.test.mjs` +6 端到端用例**：两会话同根落盘后 A 的槽位完整、看板同时列出两条 boulder 行且最近活动在前；旧单文件项目迁移后看板照常渲染；槽位与派生视图经 `scanJsonHygiene` 扫描 BOM/反斜杠/损坏全空；**删掉派生视图后续跑仍准确**（证明它真的不参与决策）；含槽位的项目根 `doctor` 无 FAIL。
+- **协议文本一致性 6 例**：断言 `commands/ulw.md` 与 `skills/ulw-execute/SKILL.md` 真的写了槽位路径、三分支、`不得自行挑一个`、schema v3 的 `stem`/`updated_at`、ledger 的 `stem`——实现改了而协议没改，主 agent 仍会按旧描述写单文件，那正是本轮要消灭的行为。
+- `node tools/doctor.mjs` 无 FAIL；`node tools/validate-frontmatter.mjs .` 通过；临时目录零残留；仓库内无 `.omz/`。
+
+**已知缺口**
+
+- **同根并发仍不是推荐用法**。槽位化消除了 boulder 的互相覆盖，但 `.omz/ulw-execute/ledger.jsonl` 仍是共享追加文件（加了 `stem` 只是让事后能反解归属，不是隔离），同一仓库两个会话并发跑 git 也会撞 `index.lock`。**推荐仍是一个会话一个 worktree**（协议本来就要求「PR/分支工作在任务专属 worktree」）——槽位化是为了让**误用不丢数据**，不是为了鼓励同根并发。
+- 迁移路径未在真实 1.7.x 项目上跑过（测试里的旧文件是构造的）。字段级断言覆盖了 OmO v2 五字段与三个扩展字段，但真实项目可能有本文档未记录的额外字段——它们会被 `{...legacy}` 原样带过去，不会丢，只是没有断言兜住。
+- `dashboard/server.mjs` 的 `parseFileView` 仍按行解析 `render-status` 的文本输出，新增的 `stem=` 段落它当作 team 行之外的 note 处理（不报错、不显示）。dashboard 侧的槽位原生支持留待下一版。
+
+---
 
 **缺陷本身（B31，自 v1.5.0 起就在）**
 

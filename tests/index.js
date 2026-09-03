@@ -17,6 +17,7 @@
 import './path.test.mjs';
 import './fallback.test.mjs';
 import './capability.test.mjs';
+import './boulder.test.mjs';
 import './transport.test.mjs';
 import './coordinator.test.mjs';
 import './server-mcp.test.mjs';

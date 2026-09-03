@@ -706,7 +706,7 @@ Windows has no native tmux pane, but the presentation layer has the dashboard/GU
 
 ---
 
-## 13. Porting bug contingencies and empirically found defects (B1–B31)
+## 13. Porting bug contingencies and empirically found defects (B1–B32)
 
 Ordered by severity and by when they were found. Each one: **symptom → root cause → solution → verification/backstop**. B1–B18 are contingencies written during the design era (checked one by one while implementing M0/M1, and handled per the contingency when hit); B19–B21 were found by the v0.5 measurements/audit; **B22–B30 are defects actually hit during v1.4 implementation and auditing** (not speculation — each has a corresponding test or an already-applied fix).
 
@@ -938,6 +938,56 @@ Ordered by severity and by when they were found. Each one: **symptom → root ca
 - **The generalizable lesson**: a command file is not a document, it is **input to an expander**. Any `!` adjacent to
   a backtick, and any ````!``` fence, is executable syntax. Reviewing it as prose cannot find this class of defect;
   only running the engine's own patterns over it can.
+
+### B32 [high] boulder as a single-valued source of truth: two sessions running /ulw in one root overwrite each other's pointer (found on 2026-09-03 from a user's question)
+
+- **Symptom**: two sessions each run `/ulw` in the same project root; once the second one writes boulder at step two,
+  the first one's `active_goal` / `works` / `session_ids` are all overwritten — while both goal files survive. The
+  knock-on effect is subtler: from then on session A's step-one "check boulder first" continuation test keeps reading
+  **B's goal**, so the B18 check actively misleads A.
+- **Root cause**: `.omz/boulder.json` is a **single-valued** source of truth — `active_goal` / `active_plan` /
+  `active_team` are all single slots, and both sessions want to own the same one. Measured (two sessions persisting in
+  the order the protocol prescribes): `works` goes from `["A-work"]` to `["B-work"]` and `session_ids` from
+  `["sess_AAA"]` to `["sess_BBB"]`, with A's record vanishing without a trace.
+- **Why a lock is the wrong tool**: `writeJsonSafe` uses tmp + rename, so a half-written file was never possible and
+  there is no interleaved write to prevent. A lock merely makes B queue behind A and **then overwrite it anyway** — the
+  disease is "one slot, two owners", not the timing of the write. Locks are the primitive for lost updates in
+  read-modify-write; here they are a mismatch.
+- **B18's real requirement is *discoverable*, not *single-valued***: a new session needs a fixed discovery entry point,
+  not an entry point with only one answer. With two unclosed goals the correct behavior is to **list them and let the
+  user choose**, not to keep only one. Single-valued was merely the cheapest encoding under the assumption "only one
+  session at a time".
+- **Solution** (implemented in 1.8.0, `adapters/zcode/boulder.mjs`):
+  ① the source of truth becomes `.omz/boulder/<stem>.json`, **one slot file per session**, each session writing only
+  its own; discovery is a `readdir` of that directory — **the directory itself is the index**, so with no shared
+  mutable index there is no lost update and **no lock is needed anywhere**.
+  ② `.omz/boulder.json` is demoted to a **derived view** (tagged `"source": "derived"`, feeding only the board) that
+  **never participates in a continuation decision**; precisely because it takes part in no decision, losing a race is
+  harmless for it. It keeps the four top-level fields render-status depends on, so the old board reads it unchanged.
+  ③ the continuation test becomes **three branches**: 0 unclosed → start fresh; 1 → ask continue-or-abandon; **≥2 →
+  list the candidates for the user to choose** (most recently active first, each with
+  `stem`/`active_goal`/`updated_at`/`status`). The third branch also fixes a hazard that **existed with a single
+  session**: under the old code a three-day-old stale boulder silently became *the* pointer with the user having no
+  idea what they were continuing.
+  ④ the old layout is turned into a single slot by `migrateLegacyView()`, **idempotent and re-entrant**, and when the
+  old file is unreadable it **does not migrate on a guess**.
+  ⑤ schema rises to v3: the five OmO v2 field names are unchanged to the letter, plus `stem` (a slot proves its own
+  ownership) and `updated_at` (drives the ordering of the three branches).
+  ⑥ two secondary shared surfaces are closed along with it: names under `.omz/plans/` gain a stem prefix
+  (`<stem>-<slug>.md`, preventing cross-session slug collisions), and every `ledger.jsonl` line gains `stem`
+  (appending never corrupts, but without a stem ownership cannot be recovered).
+- **Verification**: `tests/boulder.test.mjs` with 65 cases (written before the implementation; the first run was
+  `ERR_MODULE_NOT_FOUND`) plus 6 end-to-end cases in `tests/integration.test.mjs`. The load-bearing assertions:
+  **writing A's slot does not touch B's file (proven by both mtime and content)**, ten sessions interleaved leave all
+  ten slots intact, **deleting the derived view leaves the continuation test accurate** (proving it really is out of
+  the decision path), and 6 protocol-text cases confirming `commands/ulw.md` and `skills/ulw-execute/SKILL.md` really
+  do carry the slot path and the three branches (if the implementation changes and the protocol does not, the lead
+  agent keeps writing the single file exactly as the old text describes).
+- **The boundary that remains**: concurrency in one root is **still not the recommended usage**. `ledger.jsonl` is
+  still a shared append-only file (the `stem` field only makes ownership recoverable afterwards; it is not isolation),
+  and two sessions running git concurrently in one repository still collide on `index.lock`. The recommendation is
+  still **one session per worktree** — slots exist so that **misuse does not lose data**, not to encourage sharing a
+  root.
 
 ## 13.5 Integration risks of the optional profiles (I1–I10)
 
