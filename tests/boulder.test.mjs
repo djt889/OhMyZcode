@@ -768,6 +768,118 @@ describe('协议文本与实现一致（B32）', () => {
   });
 });
 
+/**
+ * 全仓库 slug 路径一致性（B32 的第二半）。
+ *
+ * 1.8.0 只给 commands/ulw.md 的计划路径加了 stem 前缀，但真正**写**这些文件的角色
+ * （omz-planner）、**读**它们的角色（omz-atlas）、以及 hyperplan / ulw-plan / ulw-research
+ * 都还在用裸 `<slug>`——同一条路径协议里出现两种说法，planner 按自己那份写、atlas 按自己那份找，
+ * 两个会话对相似目标推出同名 slug 时照样互相覆盖。
+ *
+ * 本组用例扫 agents/ commands/ skills/ 全部 .md，要求每一处带文件名的 slug 路径都带 stem 标记。
+ * 它存在的意义就是让「只改一半」当场变红——散文式审查抓不住这类不一致。
+ */
+describe('全仓库 slug 路径都带 stem 前缀（B32）', () => {
+  const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
+  /** 三个按 slug 命名的共享目录：撞名即互相覆盖 */
+  const SLUG_DIRS = ['plans', 'drafts', 'research'];
+  /** 认可的 stem 标记：两种占位符写法，或已由派发者填实的模板变量 */
+  const STEM_MARKERS = ['<stem>-', '<OMZ_GOAL_STEM>-', '{{SLUG}}'];
+
+  /** 递归收集 .md（跳过 node_modules/.git/.omz） */
+  function collectMd(dir, acc = []) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (['node_modules', '.git', '.omz'].includes(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) collectMd(full, acc);
+      else if (e.name.toLowerCase().endsWith('.md')) acc.push(full);
+    }
+    return acc;
+  }
+
+  const readText = (p) => fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
+
+  /** 扫出所有 `.omz/<slugdir>/<tail>` 引用；tail 为空的纯目录引用不算 */
+  function slugRefs() {
+    const out = [];
+    for (const dirName of ['agents', 'commands', 'skills']) {
+      for (const file of collectMd(path.join(ROOT, dirName))) {
+        const text = readText(file);
+        const re = new RegExp(`\\.omz/(${SLUG_DIRS.join('|')})/([^\\s\`)）,，。；:"']*)`, 'g');
+        for (const m of text.matchAll(re)) {
+          const tail = m[2];
+          if (tail === '') continue; // `.omz/plans/` 这类纯目录引用，合法
+          out.push({
+            file: path.relative(ROOT, file).split(path.sep).join('/'),
+            dir: m[1],
+            tail,
+            ref: m[0]
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  it('扫描确实找到了足够多的 slug 路径引用（防止正则写坏后空跑通过）', () => {
+    const refs = slugRefs();
+    assert.ok(refs.length >= 25, `只扫到 ${refs.length} 处 slug 路径引用，正则可能失效`);
+    // 三个目录都必须被覆盖到，否则等于漏了一整类
+    for (const d of SLUG_DIRS) {
+      assert.ok(refs.some((r) => r.dir === d), `没扫到任何 .omz/${d}/ 引用`);
+    }
+  });
+
+  it('每一处带文件名的 plans/drafts/research 路径都带 stem 标记', () => {
+    const offenders = slugRefs().filter((r) => !STEM_MARKERS.some((m) => r.ref.includes(m)));
+    assert.deepEqual(
+      offenders.map((r) => `${r.file}: ${r.ref}`),
+      [],
+      '这些路径没带 stem 前缀，两个会话撞同名 slug 就会互相覆盖（B32）'
+    );
+  });
+
+  it('agents/omz-planner.md 明确禁止自创 stem（它拿不到 sessionId）', () => {
+    const text = readText(path.join(ROOT, 'agents', 'omz-planner.md'));
+    assert.ok(text.includes('<stem>-<slug>'), 'planner 的产出路径应带 stem');
+    assert.ok(/不得自创|不得编造/.test(text), 'planner 必须被明确禁止自创 stem');
+    assert.ok(text.includes('B30') || text.includes('拿不到 sessionId'), '应说明它结构性拿不到 sessionId');
+    assert.ok(/CONTEXT/.test(text), '应说明 stem 来自派发 CONTEXT');
+  });
+
+  it('skills/ulw-plan/SKILL.md 与 3 份 references 的路径都带 stem', () => {
+    const files = [
+      path.join(ROOT, 'skills', 'ulw-plan', 'SKILL.md'),
+      path.join(ROOT, 'skills', 'ulw-plan', 'references', 'full-workflow.md'),
+      path.join(ROOT, 'skills', 'ulw-plan', 'references', 'intent-clear.md'),
+      path.join(ROOT, 'skills', 'ulw-plan', 'references', 'intent-unclear.md')
+    ];
+    for (const f of files) {
+      const text = readText(f);
+      const rel = path.relative(ROOT, f).split(path.sep).join('/');
+      const bare = [...text.matchAll(/\.omz\/(plans|drafts)\/(?!<stem>-|<OMZ_GOAL_STEM>-)([^\s`)）,，。；]+)/g)];
+      assert.deepEqual(bare.map((m) => m[0]), [], `${rel} 仍有不带 stem 的路径`);
+    }
+  });
+
+  it('ulw-research 的 worker-prompt 说明 {{SLUG}} 已含 stem、worker 原样使用', () => {
+    const text = readText(path.join(ROOT, 'skills', 'ulw-research', 'references', 'worker-prompt.md'));
+    assert.ok(text.includes('{{SLUG}}'), '应保留 {{SLUG}} 占位符');
+    assert.ok(/已含 stem/.test(text), '应说明 {{SLUG}} 已含 stem 前缀');
+    assert.ok(/原样使用|不自创/.test(text), 'worker 必须被要求原样使用而不是自行拼装');
+  });
+
+  it('commands/ulw.md 给出多会话并发的两种场景与 worktree 做法', () => {
+    const text = readText(path.join(ROOT, 'commands', 'ulw.md'));
+    assert.ok(text.includes('多会话并发'), 'ulw.md 应有多会话并发一节');
+    assert.ok(text.includes('不同项目根'), '应交代「不同项目根」场景');
+    assert.ok(/同一代码库|同一项目根/.test(text), '应交代「同一代码库」场景');
+    assert.ok(text.includes('index.lock'), '应点明 git 撞锁这个真实约束');
+    assert.ok(text.includes('git worktree add'), '应给出可直接执行的 worktree 命令');
+  });
+});
+
+
 
 
 

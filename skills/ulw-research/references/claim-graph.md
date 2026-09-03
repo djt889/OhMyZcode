@@ -10,7 +10,7 @@
 
 ## 模板
 
-路径：`.omz/research/<slug>/claim-graph.md`
+路径：`.omz/research/<stem>-<slug>/claim-graph.md`
 
 ```markdown
 # claim-graph — <slug>

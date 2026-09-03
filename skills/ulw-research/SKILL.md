@@ -25,7 +25,8 @@ description: "仅当用户显式要求调研/尽调/research,或主 agent 委派
 ## 1. 激活与范围界定
 
 - 覆盖 exploration-bounding 默认值：单主题代码库至少 3 路探索起步（见 scaling floor）。
-- 先写 `.omz/research/<slug>/intent.md`：调研问题、受众、交付格式（报告/决策备忘录/代码证据包）、截止约束。
+- 先写 `.omz/research/<stem>-<slug>/intent.md`：调研问题、受众、交付格式（报告/决策备忘录/代码证据包）、截止约束。
+  **目录名必须带 stem 前缀**（`<stem>` 取 `/ulw` 第零步的 `OMZ_GOAL_STEM`；单跑本 skill 时用真实 sessionId，拿不到就用 `<ISO 时间戳>-<git HEAD 短哈希>` 回退形态）——两个会话对相似调研推出同名 slug 会互相覆盖（B32）。派 worker 时把这个**完整目录名**填进 `{{SLUG}}`，worker 原样使用。
 
 ## 2. 5 个认识论文档（references/ 模板，调研全程维护）
 
@@ -99,15 +100,15 @@ counter-search 在本部署的实做（无搜索引擎，§0.1）：抓该来源
 
 ### 9.1 Markdown（必产）
 
-`.omz/research/<slug>/report.md`——先写完并自查（每条事实带 [Source N] / file:line，只引用 gated claim）再谈转换。
+`.omz/research/<stem>-<slug>/report.md`——先写完并自查（每条事实带 [Source N] / file:line，只引用 gated claim）再谈转换。
 
 ### 9.2 PDF（chrome headless 打印）
 
 先 md → html，再打印：
 
 ```bash
-pandoc .omz/research/<slug>/report.md -s --metadata title="<报告标题>" -o .omz/research/<slug>/report.html
-"$CHROME" --headless --disable-gpu --print-to-pdf=".omz/research/<slug>/report.pdf" ".omz/research/<slug>/report.html"
+pandoc .omz/research/<stem>-<slug>/report.md -s --metadata title="<报告标题>" -o .omz/research/<stem>-<slug>/report.html
+"$CHROME" --headless --disable-gpu --print-to-pdf=".omz/research/<stem>-<slug>/report.pdf" ".omz/research/<stem>-<slug>/report.html"
 ```
 
 Windows 上探测 chrome 可执行文件（逐条试，第一个存在的即用；把命中的路径记进 observation-manifest）：
@@ -125,7 +126,7 @@ where chrome; where msedge                                    # PATH 兜底
 ### 9.3 DOCX（pandoc）
 
 ```bash
-pandoc .omz/research/<slug>/report.md -o .omz/research/<slug>/report.docx
+pandoc .omz/research/<stem>-<slug>/report.md -o .omz/research/<stem>-<slug>/report.docx
 pandoc --version    # 先确认可用；不可用直接进 9.4 回退
 ```
 

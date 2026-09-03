@@ -931,7 +931,8 @@ Ordered by severity and by when they were found. Each one: **symptom → root ca
   exercised with an actual send.
 - **Fix**: drop the backticks around that banner in `commands/ulw.md` (the sentence reads identically), plus a
   static assertion that scans every `commands/*.md` with both engine regexes — `/!`([^`]*)`/gu` (inline) and
-  `/```!s*?
+  `/```!s*
+?
 ?([sS]*?)```/gu` (fenced) — and fails on any inline match while allowing the two
   deliberate fenced blocks. Mutation-verified in both directions: reintroducing the pattern turns it red, and the
   legitimate fenced blocks keep it green.
@@ -973,9 +974,19 @@ Ordered by severity and by when they were found. Each one: **symptom → root ca
   old file is unreadable it **does not migrate on a guess**.
   ⑤ schema rises to v3: the five OmO v2 field names are unchanged to the letter, plus `stem` (a slot proves its own
   ownership) and `updated_at` (drives the ordering of the three branches).
-  ⑥ two secondary shared surfaces are closed along with it: names under `.omz/plans/` gain a stem prefix
-  (`<stem>-<slug>.md`, preventing cross-session slug collisions), and every `ledger.jsonl` line gains `stem`
-  (appending never corrupts, but without a stem ownership cannot be recovered).
+  ⑥ two secondary shared surfaces are closed along with it: names under `.omz/plans/`, `.omz/drafts/` and
+  `.omz/research/` all gain a stem prefix (`<stem>-<slug>`, preventing cross-session collisions), and every
+  `ledger.jsonl` line gains `stem` (appending never corrupts, but without a stem ownership cannot be recovered).
+  ⑦ **completed in 1.8.1**: 1.8.0 changed only `commands/ulw.md`, while the role that actually writes
+  (`omz-planner`), the role that reads the plan (`omz-atlas`), and hyperplan / ulw-plan (with its 3 references) /
+  ulw-research (with its 5 references) were all still on a bare slug — one path with two descriptions in the
+  protocol, so the prefix was void. 1.8.1 propagates it through 12 protocol files and makes explicit that **the
+  stem is written into the dispatch CONTEXT by the lead agent** (a subagent cannot obtain the sessionId, B30), with
+  the planner and ulw-plan both gaining an explicit prohibition ("do not invent one; hand back missing stem as a
+  blocker"); `{{SLUG}}` is clarified to mean "the complete directory name, stem included, used verbatim by the
+  worker". Six accompanying consistency cases scan every `.md` in the repository, **one of which self-checks that
+  the scan really found ≥25 references across all three directories** — a guard against a broken regex passing
+  vacuously, which is a worse kind of green than no test at all.
 - **Verification**: `tests/boulder.test.mjs` with 65 cases (written before the implementation; the first run was
   `ERR_MODULE_NOT_FOUND`) plus 6 end-to-end cases in `tests/integration.test.mjs`. The load-bearing assertions:
   **writing A's slot does not touch B's file (proven by both mtime and content)**, ten sessions interleaved leave all
@@ -983,11 +994,17 @@ Ordered by severity and by when they were found. Each one: **symptom → root ca
   the decision path), and 6 protocol-text cases confirming `commands/ulw.md` and `skills/ulw-execute/SKILL.md` really
   do carry the slot path and the three branches (if the implementation changes and the protocol does not, the lead
   agent keeps writing the single file exactly as the old text describes).
-- **The boundary that remains**: concurrency in one root is **still not the recommended usage**. `ledger.jsonl` is
-  still a shared append-only file (the `stem` field only makes ownership recoverable afterwards; it is not isolation),
-  and two sessions running git concurrently in one repository still collide on `index.lock`. The recommendation is
-  still **one session per worktree** — slots exist so that **misuse does not lose data**, not to encourage sharing a
-  root.
+- **Measured conclusions for the two concurrency scenarios** (written into the "multi-session concurrency" section of
+  `commands/ulw.md` in 1.8.1): **different project roots** → each `.omz/` is independent, no conflict, just run, no
+  preparation needed. **Parallel work in one codebase** → `.omz/` state is isolated, but **the git collision is a hard
+  constraint**: three concurrent `git add` calls in one worktree measured 1 in 3 getting `fatal: Unable to create
+  '.git/index.lock': File exists.` (exit 128), and since step eight requires committing every minimal increment this
+  is the norm rather than an edge case. So parallel work in one repository **must use one worktree per session** (an
+  independent working directory + an independent git index + an independent `.omz/` — three layers of isolation at
+  once, which is exactly what Hard rule 6 intends). Concurrent appends to `ledger.jsonl` are **measured safe**: three
+  processes appending 200 lines each produced 600 intact lines, zero parse failures, and `stem` resolved ownership
+  exactly back to 200 per session — the `stem` field is sufficient and the file need not be split. Slots exist so that
+  **misuse does not lose data**; worktrees are the actual path for parallelism.
 
 ## 13.5 Integration risks of the optional profiles (I1–I10)
 

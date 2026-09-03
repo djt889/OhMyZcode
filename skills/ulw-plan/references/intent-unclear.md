@@ -25,4 +25,4 @@
 - **owner-decision**（删旧功能 / 改对外 API / 引入付费依赖 / 技术栈选型方向）必问且不给默认推荐。
 - 一次访谈 ≤5 问；超出说明计划范围失控，先砍范围。
 - 需要第二意见或广度证据才能收敛的问题，不要写成"问用户"——写成 REQUEST-n 交主 agent 代派 Explore/librarian/critic。
-- 用户答完即更新草稿 `.omz/drafts/<slug>.md`，把答案落进"已确认决策"段，再交还主 agent 走评审门。
+- 用户答完即更新草稿 `.omz/drafts/<stem>-<slug>.md`（stem 取派发 CONTEXT 给的值），把答案落进"已确认决策"段，再交还主 agent 走评审门。

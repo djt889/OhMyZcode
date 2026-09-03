@@ -32,7 +32,9 @@ thoughtLevel: high
 - 任务下嵌套注解：`Recommended task executor category: <visual-engineering|ultrabrain|deep|artistry|quick|unspecified-low|unspecified-high|writing>`
 - 波次分隔：`## Wave <n>`（Markdown 二级标题，ulw-plan ↔ ulw-execute 的机器契约，全项目一字不差）
 
-产出路径：草稿 `.omz/drafts/<slug>.md`（恢复点/批准门记录）→ 批准后 `.omz/plans/<slug>.md`。
+产出路径：草稿 `.omz/drafts/<stem>-<slug>.md`（恢复点/批准门记录）→ 批准后 `.omz/plans/<stem>-<slug>.md`。
+
+**`<stem>` 必须取派发 CONTEXT 里主 agent 给的那个值**（形态：真实 sessionId，或回退的 `<ISO 时间戳>-<git HEAD 短哈希>`）。你是子代理，结构性拿不到 sessionId（DESIGN B30）——**不得自创、不得编造、不得省略前缀**。CONTEXT 里没给就把「缺 stem」写成阻塞项交回主 agent，不要先写一个裸 slug 的文件（两个会话对相似目标推出同名 slug 会互相覆盖，B32）。
 
 ## 批准门
 

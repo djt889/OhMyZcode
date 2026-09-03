@@ -8,8 +8,8 @@ description: "纯规划模式：omz-planner 访谈 → omz-critic 差距分析 �
 
 流程：
 
-1. 派 `omz-planner`（访谈式规划）。若意图不清，planner 会按两道过滤器提问；它产出 `.omz/drafts/<slug>.md`。
-2. 草稿成形后派 `omz-critic` 做差距分析（决策完备性 / 范围完整性 / 依赖矩阵 / 验收可证伪）。blocker/major 清零后生成 `.omz/plans/<slug>.md`。
+1. 派 `omz-planner`（访谈式规划）。若意图不清，planner 会按两道过滤器提问；它产出 `.omz/drafts/<stem>-<slug>.md`（`<stem>` 由你在派发 CONTEXT 里给出——planner 拿不到 sessionId，B30/B32）。
+2. 草稿成形后派 `omz-critic` 做差距分析（决策完备性 / 范围完整性 / 依赖矩阵 / 验收可证伪）。blocker/major 清零后生成 `.omz/plans/<stem>-<slug>.md`。
 3. 若用户措辞含"high accuracy / 仔细 / 不能出错"等评审修饰词：加派 `omz-oracle` 第二评审，两份报告都过才算定稿。
 4. 批准门：把计划摘要给用户，**等待明确批准**。批准后本命令到此为止——执行请另起 `/ulw` 并引用该计划文件。
 

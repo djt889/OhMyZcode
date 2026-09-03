@@ -33,6 +33,23 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 
 **boulder 是每会话一个槽位文件，不是一个全局单文件（B32）**：`.omz/boulder/` 下每会话一份 `<stem>.json`，你只写属于自己的那一个，绝不改别人的——两个会话在同一项目根并发跑时，旧的单文件形态会让后写的把先写的 `active_goal`/`works`/`session_ids` 整体覆盖。`.omz/boulder.json` 自 1.8.0 起降级为**派生视图**（带 `"source": "derived"` 标记，只给看板读），**不得**当事实源读写。旧布局（只有单文件、没有 `boulder/` 目录）在首次访问时被一次性迁成单槽位，字段不丢、行为不变。
 
+**`.omz/` 下的每个 slug 一律带 stem 前缀**：`.omz/plans/<OMZ_GOAL_STEM>-<slug>.md`、`.omz/drafts/<OMZ_GOAL_STEM>-<slug>.md`、`.omz/research/<OMZ_GOAL_STEM>-<slug>/`。slug 由目标推导，两个会话对相似目标推出同名 slug 是现实可能，撞名就是互相覆盖；带上 stem 后无论如何都不会碰。**派 `omz-planner` / 调研轴 worker 时必须把 stem 写进 CONTEXT**——子代理结构性拿不到 sessionId（B30），它只能用你给的那个值，绝不自创。
+
+## 多会话并发（两种场景，做法不同）
+
+**不同项目根**（几个不相干的项目各跑一个 `/ulw`）：`.omz/` 各自独立，零冲突，直接跑，不必做任何额外准备。
+
+**同一代码库并行推不同任务**：`.omz/` 状态自 1.8.0 起已按会话隔离（boulder 槽位、goal 按 stem、plans/drafts/research 带 stem 前缀、runtime 按 teamId、ledger 每行带 stem 可反解归属），但**git 本身会撞锁**——同一 worktree 里两个会话并发跑 git，`index.lock` 必然随机失败（实测三并发 `git add`：1/3 得到 `fatal: Unable to create '.git/index.lock': File exists.`）。而第八步要求每个验证通过的最小增量都 commit，所以这不是偶发而是常态。
+
+因此同库并行**必须一个会话一个 worktree**：
+
+```bash
+git worktree add ../<项目名>-<任务A> <分支A>    # 会话 A 在这里跑 /ulw
+git worktree add ../<项目名>-<任务B> <分支B>    # 会话 B 在这里跑 /ulw
+```
+
+每个 worktree 有独立的工作目录、独立的 git index、独立的 `.omz/`，三层隔离一次到位；这也正是 Hard rules 第 6 条 worktree 纪律的本意。**首次运行检测到同一项目根已有其它会话的未关闭槽位、且用户意图是并行而非续跑时，先建议开 worktree，再问要不要就地继续。**
+
 ## 第一步：激活
 
 1. 命令展开时已输出 ULTRAWORK MODE ENABLED —— 本提示词自此为本会话工作宪法，全程不得降级执行。
@@ -84,7 +101,7 @@ node -e "const cp=require('child_process');const D=String.fromCharCode(36);const
 
 `active_goal` 是**跨会话找回目标的唯一权威指针**；`session_ids` 只作审计线索，不参与任何文件定位。此后每次波次推进、计划定稿（填 `active_plan`）、建团队（填 `active_team`）都就地更新**你自己的那一个槽位文件**——**绝不写别人的槽位，也绝不写 `.omz/boulder.json`**（后者是派生视图，由工具刷新）。
 
-**计划文件名带 stem 前缀**：`.omz/plans/<OMZ_GOAL_STEM>-<slug>.md`。slug 由目标推导，两个会话对相似目标推出同名 slug 是现实可能，撞名就是互相覆盖；带上 stem 后无论如何都不会碰。
+**计划与草稿文件名带 stem 前缀**：草稿 `.omz/drafts/<OMZ_GOAL_STEM>-<slug>.md` → 定稿 `.omz/plans/<OMZ_GOAL_STEM>-<slug>.md`（理由与派发要求见开头「slug 一律带 stem 前缀」一段）。
 
 ## 第三步：技能盘点
 

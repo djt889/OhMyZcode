@@ -1,6 +1,6 @@
 ---
 name: ulw-execute
-description: "仅当用户/主 agent 要求按已定稿的 .omz/plans/<slug>.md 逐波执行时激活（计划缺失则先反向调 ulw-plan 补计划）;不得空中执行,普通问答与单文件 quick 小改不得激活。"
+description: "仅当用户/主 agent 要求按已定稿的 .omz/plans/<stem>-<slug>.md 逐波执行时激活（计划缺失则先反向调 ulw-plan 补计划）;不得空中执行,普通问答与单文件 quick 小改不得激活。"
 ---
 
 # ulw-execute — 计划执行编排协议

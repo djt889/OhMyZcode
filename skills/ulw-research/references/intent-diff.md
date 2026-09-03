@@ -6,13 +6,13 @@
 
 ## 何时更新
 
-- 初始化：写完 `.omz/research/<slug>/intent.md` 后立刻把意图拆成原子子问句填进本表。
+- 初始化：写完 `.omz/research/<stem>-<slug>/intent.md` 后立刻把意图拆成原子子问句填进本表。
 - 每波（wave）结束后必须更新一次——每个 worker 的 `## EXPAND` 归并进来后，重算覆盖状态。
 - **收敛判定前强制复核**（§7 收敛规则的前置条件）。
 
 ## 模板
 
-路径：`.omz/research/<slug>/intent-diff.md`
+路径：`.omz/research/<stem>-<slug>/intent-diff.md`
 
 ```markdown
 # intent-diff — <slug>

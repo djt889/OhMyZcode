@@ -91,9 +91,9 @@ description: "仅当用户显式说 ulw-plan、要求工作计划、或主 agent
 
 ### 5. 双工件与批准门
 
-- 草稿：`.omz/drafts/<slug>.md`（恢复点 + 批准门记录 + "待主 agent 代派"段）。
+- 草稿：`.omz/drafts/<stem>-<slug>.md`（恢复点 + 批准门记录 + "待主 agent 代派"段）。**`<stem>` 取派发 CONTEXT 里主 agent 给的值**，你拿不到 sessionId（B30），不得自创或省略前缀（同名 slug 会跨会话互相覆盖，B32）；CONTEXT 没给就把「缺 stem」当阻塞项交回。
 - 评审门（**归属：主 agent**）：草稿完成后**交还主 agent 触发 omz-critic 差距分析门**；`review_required: true` 时再加 omz-reviewer + omz-oracle。**你不自行调用任何评审者**（无 Agent 工具）。
-- 定稿：critic 反馈回到你手上 → 你清掉 blocker/major → 由**主 agent 或用户确认**后复制为 `.omz/plans/<slug>.md`。你可以写这个文件，但必须先拿到"blocker/major 已清"的明确结论，不得自判通过。
+- 定稿：critic 反馈回到你手上 → 你清掉 blocker/major → 由**主 agent 或用户确认**后复制为 `.omz/plans/<stem>-<slug>.md`（stem 与草稿一致）。你可以写这个文件，但必须先拿到"blocker/major 已清"的明确结论，不得自判通过。
 - **你不推动执行**；批准后的执行由 /ulw 或 /team 的主 agent 决定。
 
 ## references/

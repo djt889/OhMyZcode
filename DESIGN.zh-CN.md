@@ -920,7 +920,8 @@ Windows 无 tmux 原生 pane，但展示层有 dashboard/GUI fallback；hook 全
 - **冒烟为什么没抓住**：§18 的链路是在 **CLI/插件发现**那个面上跑 `/ulw`，那个面只加载与列出命令；展开只发生在
   **会话发送**面，而那个面从未真正发过一次。
 - **修法**：去掉 `commands/ulw.md` 里那句横幅的反引号（句意不变），并补一条静态断言：用两条引擎正则扫每个
-  `commands/*.md`——`/!`([^`]*)`/gu`（行内）与 `/```!s*?
+  `commands/*.md`——`/!`([^`]*)`/gu`（行内）与 `/```!s*
+?
 ?([sS]*?)```/gu`（围栏）——行内命中即判红，
   同时放行那两个有意的围栏块。双向变异验证：把语法写回去变红，合法围栏块保持绿。
 - **可推广的教训**：命令文件不是文档，它是**展开器的输入**。任何紧贴反引号的 `!`、任何 ````!``` 围栏都是可执行语法。
@@ -949,15 +950,28 @@ Windows 无 tmux 原生 pane，但展示层有 dashboard/GUI fallback；hook 全
   就存在**的隐患：旧实现里三天前的陈旧 boulder 也会静默变成「那个」指针，用户根本不知道自己在续什么。
   ④ 旧布局由 `migrateLegacyView()` 一次性迁成单槽位，**幂等可重入**，旧文件损坏时**不猜着迁**。
   ⑤ schema 升 v3：OmO v2 五字段名一字不改，新增 `stem`（槽位自证归属）与 `updated_at`（供三分支排序）。
-  ⑥ 两处次生共享面一并收口：`.omz/plans/` 文件名带 stem 前缀（`<stem>-<slug>.md`，防跨会话 slug 碰名）；
-  `ledger.jsonl` 每行加 `stem`（追加写不损坏，但没有 stem 无法反解归属）。
+  ⑥ 两处次生共享面一并收口：`.omz/plans/` `.omz/drafts/` `.omz/research/` 的名字一律带 stem 前缀
+  （`<stem>-<slug>`，防跨会话碰名）；`ledger.jsonl` 每行加 `stem`（追加写不损坏，但没有 stem 无法反解归属）。
+  ⑦ **1.8.1 补齐**：1.8.0 只改了 `commands/ulw.md` 一处，真正写盘的 `omz-planner`、读计划的 `omz-atlas`、
+  以及 hyperplan / ulw-plan（含 3 份 references）/ ulw-research（含 5 份 references）都还是裸 slug——
+  同一条路径协议里两种说法，前缀等于没生效。1.8.1 把它贯穿 12 个协议文件，并明确 **stem 由主 agent
+  写进派发 CONTEXT**（子代理拿不到 sessionId，B30），planner 与 ulw-plan 均加显式禁令「不得自创、
+  缺 stem 当阻塞项交回」；`{{SLUG}}` 语义澄清为「已含 stem 的完整目录名，worker 原样使用」。
+  配套 6 条一致性用例扫全仓库 `.md` 逐处校验，**其中一条自检「确实扫到 ≥25 处且三目录全覆盖」**——
+  防正则写坏后空跑通过（那种假绿比不测更危险）。
 - **验证**：`tests/boulder.test.mjs` 65 用例（写在实现之前，首跑 `ERR_MODULE_NOT_FOUND`）+ `tests/integration.test.mjs`
   6 条端到端。关键断言：**写 A 的槽位不改动 B 的文件（mtime 与内容双证）**、十会话交错写入后十个槽位全部完整、
   **删掉派生视图后续跑仍准确**（证明它真的不在决策路径上）、协议文本 6 例确认 `commands/ulw.md` 与
   `skills/ulw-execute/SKILL.md` 真的写了槽位路径与三分支（实现改了而协议没改，主 agent 仍会按旧描述写单文件）。
-- **保留的边界**：同根并发**仍不是推荐用法**。`ledger.jsonl` 仍是共享追加文件（加 stem 只让事后可反解归属，
-  不是隔离），同一仓库两个会话并发跑 git 也会撞 `index.lock`。推荐仍是**一个会话一个 worktree**——
-  槽位化是为了让**误用不丢数据**，不是为了鼓励同根并发。
+- **两种并发场景的实测结论**（1.8.1 写进 `commands/ulw.md` 的「多会话并发」节）：
+  **不同项目根** → `.omz/` 各自独立，零冲突，直接跑，不需任何额外准备。
+  **同一代码库并行** → `.omz/` 状态已隔离，但 **git 撞锁是硬约束**：同一 worktree 三并发 `git add`
+  实测 1/3 得到 `fatal: Unable to create '.git/index.lock': File exists.`（exit 128）；而第八步要求
+  每个最小增量都 commit，所以这不是偶发而是常态。因此同库并行**必须一个会话一个 worktree**
+  （独立工作目录 + 独立 git index + 独立 `.omz/`，三层隔离一次到位，也正是 Hard rules 第 6 条的本意）。
+  `ledger.jsonl` 的并发追加**实测安全**：三进程各追加 200 行，600 行完整、零解析失败、按 stem 精确反解
+  回三个会话各 200 条——加 stem 已经够用，不需要拆文件。
+  槽位化的定位是让**误用不丢数据**；worktree 才是并行的正路。
 
 ## 13.5 可选 profile 集成风险（I1–I10）
 

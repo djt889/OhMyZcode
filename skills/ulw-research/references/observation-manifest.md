@@ -10,7 +10,7 @@
 
 ## 模板
 
-路径：`.omz/research/<slug>/observation-manifest.md`（append-only）
+路径：`.omz/research/<stem>-<slug>/observation-manifest.md`（append-only）
 
 ```markdown
 # observation-manifest — <slug>
@@ -26,7 +26,7 @@
   ```
 - 网络来源（operator 为 WebFetch 时必填）：`<URL>`　访问日期：2026-09-01　抓取形态：<全文 | 摘要 | 失败(状态码)>
 - 结果摘要（≤5 行，事实性，不含解读）：<...>
-- 原始输出留档：`.omz/research/<slug>/raw/O-001.txt`（超 20 行的输出一律外置，此处只留路径）
+- 原始输出留档：`.omz/research/<stem>-<slug>/raw/O-001.txt`（超 20 行的输出一律外置，此处只留路径）
 - 产生的 claim：C-003（new）｜C-001（补证据 [S2]）｜无
 - 代价：`cheap`（<10s 无副作用）｜`moderate`（≤2min 或需装依赖）｜`expensive`（改环境/长跑/需人工）
 - 可重放性：`replayable`｜`time-sensitive`（结果随上游变化，附访问日期）｜`one-shot`（环境已变，不可重放，说明原因）

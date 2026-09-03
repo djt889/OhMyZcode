@@ -2,7 +2,7 @@
 
 # OMZ 实现变更日志
 
-**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.8.0** ↔ DESIGN **v1.5**（1.6.0 至 1.7.2 是文档、打包与缺陷修复版本，均未改动设计规格；1.8.0 改了 `.omz/` 的状态布局，见下条）。
+**两套版本号**：`package.json` / `.zcode-plugin/plugin.json` 里的版本号追踪**实现**进度；`DESIGN.md` 顶部的 v1.x 是**设计文档**版本。两者的 minor 位对齐到同一份规格——一个是"写下来"，一个是"跑起来"。当前：实现 **1.8.1** ↔ DESIGN **v1.5**（1.6.0 至 1.7.2 是文档、打包与缺陷修复版本，均未改动设计规格；1.8.0 改了 `.omz/` 的状态布局，1.8.1 把该布局贯穿到全部协议文本，见下两条）。
 
 **跳号是有意的**：0.7.0 / 0.8.0 预留给 `graph` profile（DESIGN §9 M1-G，需外部安装 `@colbymchenry/codegraph` 并在目标项目 `codegraph init`）与真实环境实测回写（§10.2 当前的五项：**V3** hook `additionalContext` 注入行为、**V4** resume 适配器、**V8′** 并行 spawn 的权限弹窗时序、**V10** CodeGraph 装机、**V11** Electron dashboard 真机渲染与 CSP 实际拦截），两类都依赖真机安装环境或真实 ZCode 会话，本轮未交付；1.0.0 未单独发布，orchestration 层落地后直接进入 1.x 线。清单本身随版本收缩：**V8** 的枚举部分与 **V9** 并发压测在 1.4.0 结清（V8 只剩弹窗子项，记为 V8′），**V12** 的 9 个 agent spawn ping 在 1.5.0 装机验收结清（六项 → 五项）。
 
@@ -10,7 +10,35 @@
 
 ---
 
-## 1.8.0 — boulder 槽位化：两个会话同根跑 /ulw 不再互相覆盖（2026-09-03）
+## 1.8.1 — stem 前缀贯穿全协议 + 多会话并发的两种做法写进 /ulw（2026-09-03）
+
+**缺陷（1.8.0 自身引入的不一致）**
+
+1.8.0 声明「`.omz/plans/` 文件名带 stem 前缀」，但**只改了 `commands/ulw.md` 一处**。真正**写**这些文件的角色（`agents/omz-planner.md`）、**读**它们的角色（`agents/omz-atlas.md`）、以及 `commands/hyperplan.md`、`skills/ulw-plan/SKILL.md` 与它的 3 份 references、`skills/ulw-execute` 的 description 全都还在用裸 `<slug>`。同一条路径协议里出现两种说法：planner 按自己那份写 `.omz/plans/<slug>.md`，atlas 按自己那份找同名文件——**stem 前缀在实际写盘路径上等于没生效**，两个会话对相似目标推出同名 slug 时照样互相覆盖。
+
+`.omz/drafts/<slug>.md` 与 `.omz/research/<slug>/` 这两个同样按 slug 命名的共享目录，1.8.0 压根没碰。
+
+**范围**
+
+- **stem 前缀贯穿 12 个协议文件**：`agents/omz-planner.md`（草稿+定稿）、`agents/omz-atlas.md`（读计划）、`commands/hyperplan.md`（草稿+定稿）、`commands/ulw.md`、`skills/ulw-execute/SKILL.md`（description）、`skills/ulw-plan/SKILL.md` + `references/{full-workflow,intent-clear,intent-unclear}.md`、`skills/ulw-research/SKILL.md` + `references/{cause-disappearance,verification-economics,observation-manifest,claim-graph,intent-diff}.md`。研究目录 15 处路径一并改为 `.omz/research/<stem>-<slug>/`。
+- **明确 stem 的传递链**：子代理结构性拿不到 sessionId（B30），所以 **stem 必须由主 agent 写进派发 CONTEXT**。planner 与 ulw-plan 都新增了显式禁令——不得自创、不得编造、不得省略前缀；CONTEXT 里没给就把「缺 stem」当阻塞项交回主 agent，**不许先写一个裸 slug 的文件**。`ulw-research` 的 `{{SLUG}}` 语义澄清为「已含 stem 前缀的**完整目录名**」，worker 原样使用、不拆解、不重拼。
+- **`commands/ulw.md` 新增「多会话并发」一节**，按两种场景分别给做法：**不同项目根** → `.omz/` 各自独立，零冲突，直接跑；**同一代码库并行推不同任务** → `.omz/` 状态自 1.8.0 起已隔离，但 **git 本身会撞锁**，因此必须一个会话一个 worktree（给出可直接执行的 `git worktree add` 命令）。同时要求：首次运行发现同根已有其它会话的未关闭槽位、而用户意图是并行而非续跑时，**先建议开 worktree**。
+
+**验证**
+
+- `node --test tests/` 与 `npm test` 均 **656 tests / 656 pass / 0 fail**（1.8.0 是 650，+6）。
+- **新增「全仓库 slug 路径都带 stem 前缀」6 用例**：递归扫 `agents/` `commands/` `skills/` 全部 `.md`，用正则抽出每一处 `.omz/(plans|drafts|research)/<tail>` 引用（纯目录引用不计），断言每一处都带 `<stem>-` / `<OMZ_GOAL_STEM>-` / `{{SLUG}}` 三种标记之一。**另有一条「扫描确实找到 ≥25 处、三个目录都覆盖到」的自检**——防止正则写坏后空跑通过，那种假绿比不测更危险。其余 4 例分别钉住 planner 的禁令措辞、ulw-plan 四文件无裸路径、worker-prompt 的 `{{SLUG}}` 语义、以及 ulw.md 多会话节的四个要点（含 `index.lock` 与 `git worktree add`）。
+- **git 撞锁是实测的，不是推断**：同一 worktree 三并发 `git add`（各 400 文件），worker1 得到 `fatal: Unable to create '.git/index.lock': File exists.`（exit 128），另两个 exit 0 —— 1/3 撞锁。
+- **ledger 并发追加实测安全**：三进程各追加 200 行（每行约 300 字节），结果 600 行完整、零解析失败、按 `stem` 精确反解回 `{"sess_A":200,"sess_B":200,"sess_C":200}`。所以 1.8.0 给 ledger 加 `stem` 已经够用，不需要再拆文件。
+- `node tools/doctor.mjs` 无 FAIL；`node tools/validate-frontmatter.mjs .` 通过；临时目录零残留。
+
+**已知缺口**
+
+- 一致性测试只覆盖 `agents/` `commands/` `skills/` 三个目录的 `.md`。`DESIGN.md` / `CHANGELOG.md` 里的历史叙述仍保留裸 `<slug>` 写法（它们描述的是当时的事实，不该被追改），代价是这两份文档与当前协议在该细节上不一致——读者需以 `agents/commands/skills` 为准。
+- 多会话并发的 worktree 做法是**写进协议的建议**，不是引擎强制。主 agent 是否照做取决于它是否读到并遵守该节；没有任何机制能阻止用户在同一 worktree 里硬开两个会话（届时 `.omz/` 不会丢数据，但 git 提交会随机失败）。
+- `.omz/runtime/<teamId>/` 与 `.mode-injected-<sessionId>` 本来就按 id 隔离，本轮未改动，也未新增针对它们的并发用例。
+
+---
 
 **缺陷（B32，自 v1.0 起存在）**
 

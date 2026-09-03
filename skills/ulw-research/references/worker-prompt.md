@@ -8,7 +8,7 @@
 
 ## 占位符（派发前全部填实，宁冗勿省）
 
-`{{SLUG}}` 调研 slug｜`{{WAVE}}` 波次号（W1/W2…）｜`{{AXIS_ID}}` 轴 id（如 `W2/axis-3`）｜`{{AXIS}}` 本轴要回答的**单一**问句｜`{{INTENT_IDS}}` 本轴对应的 intent-diff 子问句 id｜`{{SCOPE}}` 范围边界（目录/模块/URL 清单）｜`{{URLS}}` 已知外部链接清单（本部署无搜索引擎，必须由派发者提供）｜`{{KNOWN_FACTS}}` 已确认事实与已有 claim id｜`{{DEAD_ENDS}}` 前几波已证死的方向｜`{{OBS_NEXT_ID}}` 本 worker 起始观察 id（如 `O-021`）｜`{{CLAIM_NEXT_ID}}` 起始 claim id（如 `C-012`）｜`{{AGENT_TYPE}}` omz-librarian | omz-junior | omz-deep | omz-oracle
+`{{SLUG}}` 调研目录名——**已含 stem 前缀的完整目录名**（形如 `<stem>-<短语>`，如 `sess_c99601d3-vmscan-folio`）；worker 原样使用，不拆解、不重拼、不自创（子代理拿不到 sessionId，B30/B32）｜`{{WAVE}}` 波次号（W1/W2…）｜`{{AXIS_ID}}` 轴 id（如 `W2/axis-3`）｜`{{AXIS}}` 本轴要回答的**单一**问句｜`{{INTENT_IDS}}` 本轴对应的 intent-diff 子问句 id｜`{{SCOPE}}` 范围边界（目录/模块/URL 清单）｜`{{URLS}}` 已知外部链接清单（本部署无搜索引擎，必须由派发者提供）｜`{{KNOWN_FACTS}}` 已确认事实与已有 claim id｜`{{DEAD_ENDS}}` 前几波已证死的方向｜`{{OBS_NEXT_ID}}` 本 worker 起始观察 id（如 `O-021`）｜`{{CLAIM_NEXT_ID}}` 起始 claim id（如 `C-012`）｜`{{AGENT_TYPE}}` omz-librarian | omz-junior | omz-deep | omz-oracle
 
 ## 模板（8 要素）
 

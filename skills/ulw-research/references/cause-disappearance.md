@@ -12,7 +12,7 @@
 
 ## 模板
 
-路径：`.omz/research/<slug>/cause-disappearance.md`
+路径：`.omz/research/<stem>-<slug>/cause-disappearance.md`
 
 ```markdown
 # cause-disappearance — <slug>

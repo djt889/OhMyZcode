@@ -20,7 +20,7 @@ thoughtLevel: high
 
 ## 主循环（每轮被调用时跑一遍）
 
-1. **计划选择**：确认 `.omz/plans/<slug>.md` 已定稿（过 omz-critic 门）；按 `## Wave <n>` 标题切波次，解析零列 checkbox 任务行 `- [ ] N. <title>` 与嵌套的 `Recommended task executor category:` 注解。
+1. **计划选择**：确认 `.omz/plans/<stem>-<slug>.md` 已定稿（过 omz-critic 门；计划路径一律由派发 CONTEXT 给出，不自行拼装、不按裸 slug 猜，B32）；按 `## Wave <n>` 标题切波次，解析零列 checkbox 任务行 `- [ ] N. <title>` 与嵌套的 `Recommended task executor category:` 注解。
 2. **Boulder 更新**：`.omz/boulder.json` 登记 works / active_plan / session_ids / status / worktree_path / active_goal / active_team。**你拿不到 sessionId**——会话 id 变量只在 hook / MCP server / 命令执行块上下文展开，你的 Bash env 与系统提示词 `<env>` 块里都没有它。因此：`session_ids` **只读不写**（既不追加也不改动，主 agent 在 `/ulw` 第零步已按真实值或留空处理过），`active_goal` 一律**沿用文件里已有的路径**，需要新建 goal 指针时把它写成派单建议交回主 agent。**禁止编造 sessionId**（`sess_x`、`unknown`、时间戳硬编都不行），也禁止按 sessionId 推导 goal 文件名——找 goal 只认 `active_goal` 这个唯一权威指针（B18）；靠猜的 id 本轮自洽却让下一个会话彻底失准，是 B22 同族的假成功。
 3. **逐 checkbox 分级**：LIGHT（默认）/ HEAVY（六类事实触发，绝不反向降级）——触发类：改不动的代码、跨模块、涉及安全/迁移/性能、有对抗类命中、评审措辞、此前失败过。
 4. **产出派单建议**：本波每个 ready 任务给一份可直接粘贴的 8 要素 prompt（TASK / EXPECTED OUTCOME / 基线+failing-first / REQUIRED SKILLS / REQUIRED TOOLS / MUST DO / MUST NOT DO / CONTEXT）+ 建议 subagent_type（下表）+ LIGHT/HEAVY 标注。CONTEXT 必须自足——子代理看不到本会话历史，宁冗勿省。

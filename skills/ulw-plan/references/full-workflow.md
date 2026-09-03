@@ -31,10 +31,10 @@
 
 ## 4. 草稿 → 评审 → 定稿
 
-- 草稿 `.omz/drafts/add-watch-mode.md`：登记已确认决策、已采纳默认值、"待主 agent 代派"段。
+- 草稿 `.omz/drafts/<stem>-add-watch-mode.md`（`<stem>` 取派发 CONTEXT 给的值，如 `sess_c99601d3`）：登记已确认决策、已采纳默认值、"待主 agent 代派"段。
 - 草稿写好后**交还主 agent**，请求它派 omz-critic 做差距分析（你不能自己派）。
 - critic 差距分析（由主 agent 派发，结论回传给你）：发现"未覆盖终端 resize / 长任务中断"两条 major → 你把它们补进 Wave 2。
-- 用户批准 → 写 `.omz/plans/add-watch-mode.md`。
+- 用户批准 → 写 `.omz/plans/<stem>-add-watch-mode.md`（stem 与草稿一致）。
 
 ## 5. 计划节选（机器契约示例）
 

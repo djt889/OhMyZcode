@@ -29,4 +29,4 @@
 - [ ] 每个任务行的 category 取自 §5.1 八类枚举
 - [ ] 测试与实现不在同一波次并行
 - [ ] 终验可执行（有具体命令/检查），非"应该没问题"
-- [ ] 草稿落盘 `.omz/drafts/<slug>.md`，批准后复制为 `.omz/plans/<slug>.md`
+- [ ] 草稿落盘 `.omz/drafts/<stem>-<slug>.md`（stem 取派发 CONTEXT 给的值，不自创），批准后复制为 `.omz/plans/<stem>-<slug>.md`

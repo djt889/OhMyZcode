@@ -4,9 +4,10 @@
 
 **Two version numbers**: the version in `package.json` / `.zcode-plugin/plugin.json` tracks **implementation**
 progress; the v1.x at the top of `DESIGN.md` is the **design document** version. The minor digits of the two are
-aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.8.0** ↔
+aligned to the same spec — one is "written down", the other is "running". Currently: implementation **1.8.1** ↔
 DESIGN **v1.5** (1.6.0 through 1.7.2 are documentation, packaging and defect-fix releases that change no design
-spec; 1.8.0 changes the on-disk layout of `.omz/`, see the entry below).
+spec; 1.8.0 changes the on-disk layout of `.omz/` and 1.8.1 propagates that layout through every protocol file —
+see the two entries below).
 
 **Skipped numbers are intentional**: 0.7.0 / 0.8.0 are reserved for the `graph` profile (DESIGN §9 M1-G, which
 requires installing `@colbymchenry/codegraph` externally and running `codegraph init` in the target project) and for
@@ -25,7 +26,74 @@ output on Node v22.14.0 / Windows on 2026-09-01.
 
 ---
 
-## 1.8.0 — boulder slots: two sessions running /ulw in one root no longer overwrite each other (2026-09-03)
+## 1.8.1 — the stem prefix reaches every protocol file, and /ulw gains the two multi-session recipes (2026-09-03)
+
+**The defect (an inconsistency 1.8.0 introduced itself)**
+
+1.8.0 declared "names under `.omz/plans/` carry a stem prefix" but **changed only `commands/ulw.md`**. The role that
+actually **writes** those files (`agents/omz-planner.md`), the role that **reads** them (`agents/omz-atlas.md`), plus
+`commands/hyperplan.md`, `skills/ulw-plan/SKILL.md` with its 3 references and the description of
+`skills/ulw-execute` were all still on a bare `<slug>`. One path had two descriptions in the protocol: the planner
+wrote `.omz/plans/<slug>.md` per its own copy and atlas looked for the same bare name per its own — so **the stem
+prefix was void on the path that actually gets written**, and two sessions deriving the same slug for similar goals
+kept overwriting each other.
+
+`.omz/drafts/<slug>.md` and `.omz/research/<slug>/`, two more directories named by slug, were not touched by 1.8.0 at
+all.
+
+**Scope**
+
+- **The stem prefix now reaches 12 protocol files**: `agents/omz-planner.md` (draft + final), `agents/omz-atlas.md`
+  (reading the plan), `commands/hyperplan.md` (draft + final), `commands/ulw.md`,
+  `skills/ulw-execute/SKILL.md` (description), `skills/ulw-plan/SKILL.md` plus
+  `references/{full-workflow,intent-clear,intent-unclear}.md`, and `skills/ulw-research/SKILL.md` plus
+  `references/{cause-disappearance,verification-economics,observation-manifest,claim-graph,intent-diff}.md`. The
+  research directory's 15 path references all become `.omz/research/<stem>-<slug>/`.
+- **The stem's delivery chain is made explicit**: a subagent structurally cannot obtain the sessionId (B30), so the
+  **stem must be written into the dispatch CONTEXT by the lead agent**. Both the planner and ulw-plan gain an explicit
+  prohibition — do not invent, do not fabricate, do not omit the prefix; if CONTEXT did not supply one, hand "missing
+  stem" back to the lead as a blocker and **do not write a bare-slug file first**. `ulw-research`'s `{{SLUG}}` is
+  clarified to mean "the **complete directory name**, stem prefix included", which the worker uses verbatim without
+  splitting or re-assembling it.
+- **`commands/ulw.md` gains a "multi-session concurrency" section** with a recipe per scenario: **different project
+  roots** → each `.omz/` is independent, no conflict, just run; **parallel tasks in one codebase** → `.omz/` state has
+  been isolated since 1.8.0, but **git itself collides**, so it must be one worktree per session (with a ready-to-run
+  `git worktree add`). It also requires that when a first run finds another session's unclosed slot in the same root
+  and the user's intent is parallel work rather than continuation, the lead **suggests a worktree first**.
+
+**Verification**
+
+- `node --test tests/` and `npm test` both report **656 tests / 656 pass / 0 fail** (1.8.0 stood at 650, so +6).
+- **A new 6-case group, "every slug path carries a stem prefix"**: it walks every `.md` under `agents/` `commands/`
+  `skills/`, extracts each `.omz/(plans|drafts|research)/<tail>` reference by regex (bare directory references
+  excluded) and asserts each one carries one of `<stem>-` / `<OMZ_GOAL_STEM>-` / `{{SLUG}}`. **One of the six asserts
+  the scan itself found ≥25 references across all three directories** — a guard against a broken regex passing
+  vacuously, which is a worse kind of green than no test at all. The other four pin the planner's prohibition wording,
+  the four ulw-plan files being free of bare paths, worker-prompt's `{{SLUG}}` semantics, and the four load-bearing
+  points of ulw.md's multi-session section (including `index.lock` and `git worktree add`).
+- **The git collision is measured, not inferred**: three concurrent `git add` calls (400 files each) in one worktree —
+  worker1 got `fatal: Unable to create '.git/index.lock': File exists.` (exit 128) while the other two exited 0, i.e.
+  1 in 3 collided.
+- **Concurrent ledger appends are measured safe**: three processes appending 200 lines each (~300 bytes per line)
+  produced 600 intact lines, zero parse failures, and `stem` resolved ownership exactly back to
+  `{"sess_A":200,"sess_B":200,"sess_C":200}`. So the `stem` field 1.8.0 added is sufficient and the file does not need
+  splitting.
+- `node tools/doctor.mjs` reports no FAIL; `node tools/validate-frontmatter.mjs .` passes; zero residue in the temp
+  directory.
+
+**Known gaps**
+
+- The consistency test only covers `.md` files under the three directories `agents/` `commands/` `skills/`. The
+  historical narrative in `DESIGN.md` / `CHANGELOG.md` keeps the bare `<slug>` form (it describes what was true at the
+  time and should not be retro-edited), at the cost of those two documents disagreeing with the current protocol on
+  this detail — read `agents/commands/skills` as authoritative.
+- The worktree recipe for multi-session work is **advice written into the protocol**, not enforced by the engine.
+  Whether the lead agent follows it depends on whether it read and honored that section; nothing prevents a user from
+  opening two sessions in one worktree anyway (in which case `.omz/` loses no data, but git commits fail at random).
+- `.omz/runtime/<teamId>/` and `.mode-injected-<sessionId>` were already isolated by id, were not touched this round,
+  and gained no new concurrency cases.
+
+---
 
 **The defect (B32, present since v1.0)**
 

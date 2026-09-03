@@ -10,7 +10,7 @@ claim 在 `claim-graph.md` 建档时同步定价（每个 claim 必须有一行�
 
 ## 模板
 
-路径：`.omz/research/<slug>/verification-economics.md`
+路径：`.omz/research/<stem>-<slug>/verification-economics.md`
 
 ```markdown
 # verification-economics — <slug>
